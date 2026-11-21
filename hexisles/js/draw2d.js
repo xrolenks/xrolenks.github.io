@@ -65,172 +65,9 @@ function cardGlyph(t) {
   }
   return glyph(t);
 }
-// Scenery scattered on a land tile (around the number disc), back row first: [x, y, size]
-const SCENE = [[0, -34, .8], [-29, -19, .85], [29, -19, .85], [-30, 13, .85], [30, 13, .85], [-13, 31, .7], [13, 31, .7]];
-// A Fields tile is one continuous wheat field: rows of stalks from back to front (front rows bigger and
-// drawn over the ones behind, like looking across a real field), clipped to the tile, swaying in the wind.
-function wheat(i) {
-  const h = HEX[i], k = TILE - .02;
-  const pts = h.v.map(v => ((VERT[v].x - h.x) * k).toFixed(1) + ',' + ((VERT[v].y - h.y) * k).toFixed(1)).join(' ');
-  let s = i * 97 + 13;
-  const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;      // same field every time for this tile
-  const f = n => n.toFixed(1);
-  let out = '<clipPath id="wc' + i + '"><polygon points="' + pts + '"/></clipPath><g clip-path="url(#wc' + i + ')">';
-  out += '<polygon points="' + pts + '" fill="#8a6219"/>';      /* the soil between the rows */
-  let row = 0;
-  // Each stalk: a thin stem, then a crisp ear (a pointed seed head with a dark outline, a lit centre line
-  // and two fine whiskers). Clear shapes with outlines read sharply even when the board is small.
-  for (let y = -S + 4; y <= S + 14; y += 7, row++) {
-    const d = (y + S) / (2 * S), sc = .85 + .4 * d;      /* d: 0 at the back, 1 at the front */
-    let stem = '', ear = '', lit = '', awn = '';
-    for (let x = -S - 6 + r() * 4; x < S + 6; x += 4.9 * sc) {
-      const bx = x + (r() - .5) * 1.6, tall = (9.5 + r() * 3) * sc, lean = (r() - .5) * 2.2, tx = bx + lean, ty = y - tall;
-      if (nearDisc(Math.min(bx, tx) - 2, ty - 3, Math.max(bx, tx) + 2, y)) continue;      /* a clear patch round the number */
-      const x0 = bx + lean * .62, y0 = y - tall * .62, w = 1.75 * sc, xm = (x0 + tx) / 2, ym = (y0 + ty) / 2;
-      stem += 'M' + f(bx) + ' ' + f(y) + 'L' + f(x0) + ' ' + f(y0);
-      ear += 'M' + f(x0) + ' ' + f(y0) + 'Q' + f(xm - 2 * w) + ' ' + f(ym) + ' ' + f(tx) + ' ' + f(ty) + 'Q' + f(xm + 2 * w) + ' ' + f(ym) + ' ' + f(x0) + ' ' + f(y0) + 'Z';
-      lit += 'M' + f(x0 - .3 * w) + ' ' + f(y0 - 1) + 'L' + f(tx - .3 * w) + ' ' + f(ty + 1.2);
-      awn += 'M' + f(tx) + ' ' + f(ty + .6) + 'l' + f(-1.4 * sc + lean * .3) + ' ' + f(-3 * sc) + 'M' + f(tx) + ' ' + f(ty + .6) + 'l' + f(1.2 * sc + lean * .3) + ' ' + f(-3.2 * sc);
-    }
-    const ec = d < .35 ? '#d4a63a' : d < .7 ? '#e6bb4b' : '#f2cb5a';     /* rows further back look a little darker */
-    out += '<rect x="' + (-S - 8) + '" y="' + f(y - 2.2) + '" width="' + (2 * S + 16) + '" height="3.4" fill="rgba(60,35,5,.45)"/>';
-    if (stem) out += '<g class="sway" style="' + sync(3400, row * 190) + '"><path d="' + stem + '" stroke="#8f6418" stroke-width="' + f(.7 * sc) + '" fill="none"/>' +
-      '<path d="' + awn + '" stroke="#c99a32" stroke-width="' + f(.35 * sc) + '" fill="none"/>' +
-      '<path d="' + ear + '" fill="' + ec + '" stroke="#7a5310" stroke-width="' + f(.45 * sc) + '" stroke-linejoin="round"/>' +
-      '<path d="' + lit + '" stroke="#fff6c4" stroke-width="' + f(.55 * sc) + '" stroke-linecap="round" fill="none" opacity=".9"/></g>';
-  }
-  // soft light from the top left and shade towards the front edge, so the field reads as a raised block
-  return out + '<polygon points="' + pts + '" fill="url(#g-fieldlight)"/></g>';
-}
-// Does the box x0..x1, y0..y1 (tile units, 0,0 = tile centre) come within DISCGAP of the number disc?
-// Scenery inside that ring is left out so the number always stands in a clear patch.
-const DISCGAP = 22;
-const nearDisc = (x0, y0, x1, y1, gap) => Math.hypot(Math.max(x0 - 1, 1 - x1, 0), Math.max(y0 - 2, 2 - y1, 0)) < (gap || DISCGAP);      // disc (with shadow) centred near 1,2
-// A Jungle tile is one thick forest, built like the wheat field: rows of trees from back to front, front rows
-// bigger, back rows darker. Leafy trees and pines mixed. Only the trunks have to stand on the tile, so the
-// crowns of the back row rise over the tile behind (it's drawn earlier), which makes the forest look tall.
-// Each row is a few paths (one per colour), so a tile of ~80 trees stays cheap to redraw.
-function forest(i) {
-  const h = HEX[i], k = TILE - .02, R = S * TILE - 5, r3 = Math.sqrt(3);
-  const pts = h.v.map(v => ((VERT[v].x - h.x) * k).toFixed(1) + ',' + ((VERT[v].y - h.y) * k).toFixed(1)).join(' ');
-  let s = i * 131 + 7;
-  const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;      // same forest every time for this tile
-  const f = n => n.toFixed(1);
-  const oval = (x, y, rx, ry) => 'M' + f(x - rx) + ' ' + f(y) + 'a' + f(rx) + ' ' + f(ry) + ' 0 1 0 ' + f(2 * rx) + ' 0a' + f(rx) + ' ' + f(ry) + ' 0 1 0 ' + f(-2 * rx) + ' 0';
-  const tri = p => 'M' + p.map(([x, y]) => f(x) + ' ' + f(y)).join('L') + 'Z';
-  let ground = '<clipPath id="fc' + i + '"><polygon points="' + pts + '"/></clipPath><g clip-path="url(#fc' + i + ')">' +
-    '<polygon points="' + pts + '" fill="#123d22" opacity=".45"/>';      /* the shady forest floor, with ferns and moss in the clearing */
-  for (let n = 0; n < 14; n++) ground += '<ellipse cx="' + f((r() - .5) * 70) + '" cy="' + f((r() - .5) * 70) + '" rx="' + f(5 + r() * 7) + '" ry="' + f(2.5 + r() * 3) + '" fill="#2f7a45" opacity=".35"/>';
-  let trees = '', row = 0;
-  for (let y = -S * .82; y <= S * .92; y += 7.5, row++) {
-    const d = (y + S) / (2 * S), sc = .75 + .4 * d;      /* d: 0 at the back, 1 at the front */
-    const pal = d < .33 ? ['#0e3a1f', '#16502b', '#2a7342'] : d < .66 ? ['#12472a', '#1d6436', '#3a9152'] : ['#155231', '#227440', '#4ea866'];
-    let sh = '', tr = '', dk = '', md = '', lt = '';
-    for (let x = -S + r() * 4; x < S; x += (6.2 + r() * 2) * sc) {
-      const bx = x + (r() - .5) * 2, by = y + (r() - .5) * 2, z = sc * (.85 + r() * .3), pine = r() < .35;
-      if (Math.abs(bx) > R * r3 / 2 || Math.abs(by) > R - Math.abs(bx) / r3) continue;      /* trunk must be on the tile */
-      if (nearDisc(bx - 5.5 * z, by - 19 * z, bx + 6 * z, by, 18.5)) continue;      /* no part of the tree touches the number disc */
-      sh += oval(bx + 2 * z, by + .5 * z, 5 * z, 1.6 * z);
-      tr += 'M' + f(bx - .8 * z) + ' ' + f(by) + 'h' + f(1.6 * z) + 'v' + f(-5 * z) + 'h' + f(-1.6 * z) + 'Z';
-      if (pine) {
-        for (let j = 0; j < 3; j++) {      /* three tiers, the left part lit */
-          const yb = by - (2.5 + j * 4.5) * z, w = (5.5 - j * 1.3) * z, top = yb - (8 - j * .8) * z;
-          dk += tri([[bx - w, yb], [bx, top], [bx + w, yb]]);
-          md += tri([[bx - w, yb], [bx, top], [bx + w * .15, yb]]);
-        }
-        lt += tri([[bx - 1.2 * z, by - 15 * z], [bx, by - 19.2 * z], [bx + .3 * z, by - 15 * z]]);
-      } else {      /* a round leafy crown: shaded back, mid front, a lit spot top left */
-        dk += oval(bx + 1.8 * z, by - 8 * z, 4.6 * z, 4.6 * z) + oval(bx - 2.6 * z, by - 6.5 * z, 3.6 * z, 3.6 * z);
-        md += oval(bx - .8 * z, by - 9.5 * z, 4.4 * z, 4.4 * z);
-        lt += oval(bx - 2.2 * z, by - 11.3 * z, 2.2 * z, 2.2 * z);
-      }
-    }
-    if (dk) trees += '<g class="sway tree" style="' + sync(5200, row * 260) + '"><path d="' + sh + '" fill="rgba(0,0,0,.28)"/><path d="' + tr + '" fill="#4a2e14"/>' +
-      '<path d="' + dk + '" fill="' + pal[0] + '"/><path d="' + md + '" fill="' + pal[1] + '"/><path d="' + lt + '" fill="' + pal[2] + '"/></g>';
-  }
-  return ground + '</g>' + trees;
-}
-// A Pasture tile: grass (lighter patches and tufts), a post-and-rail fence round a paddock with a gate in
-// the front, and sheep inside, some dipping their heads to graze now and then. Back fence first, then the
-// sheep from back to front, then the front fence, so everything overlaps the right way.
-function pasture(i) {
-  const h = HEX[i], k = TILE - .02, F = .86;
-  const C = h.v.map(v => [(VERT[v].x - h.x), (VERT[v].y - h.y)]);
-  const pts = C.map(([x, y]) => (x * k).toFixed(1) + ',' + (y * k).toFixed(1)).join(' ');
-  let s = i * 173 + 29;
-  const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;      // same pasture every time for this tile
-  const f = n => n.toFixed(1);
-  let out = '<clipPath id="pc' + i + '"><polygon points="' + pts + '"/></clipPath><g clip-path="url(#pc' + i + ')">';
-  for (let n = 0; n < 9; n++) out += '<ellipse cx="' + f((r() - .5) * 80) + '" cy="' + f((r() - .5) * 80) + '" rx="' + f(8 + r() * 10) + '" ry="' + f(4 + r() * 5) + '" fill="#c4ea8c" opacity=".35"/>';
-  let tuft = '';
-  for (let n = 0; n < 70; n++) { const x = (r() - .5) * 92, y = (r() - .5) * 92; tuft += 'M' + f(x) + ' ' + f(y) + 'l-1.2-2.6M' + f(x) + ' ' + f(y) + 'l.2-3M' + f(x) + ' ' + f(y) + 'l1.4-2.4'; }
-  out += '<path d="' + tuft + '" stroke="#4f8a2c" stroke-width=".7" stroke-linecap="round" fill="none"/></g>';
-  // the fence: one stretch per side of the paddock (a hexagon F of the tile), the front-most side has a gate
-  const P = C.map(([x, y]) => [x * F, y * F]);
-  const sides = P.map((a, j) => [a, P[(j + 1) % 6]]);
-  const gate = sides.reduce((g, sd, j) => (sd[0][1] + sd[1][1] > sides[g][0][1] + sides[g][1][1] ? j : g), 0);
-  const stretch = (a, b) => {      // rails from a to b with posts along them
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round(len / 8));
-    let g = '<path d="M' + f(a[0]) + ' ' + f(a[1] + .5) + 'L' + f(b[0]) + ' ' + f(b[1] + .5) + '" stroke="rgba(0,0,0,.2)" stroke-width="2.2"/>';
-    for (const dy of [5.6, 2.8]) g += '<path d="M' + f(a[0]) + ' ' + f(a[1] - dy) + 'L' + f(b[0]) + ' ' + f(b[1] - dy) + '" stroke="#5a3a18" stroke-width="1.7" stroke-linecap="round"/><path d="M' + f(a[0]) + ' ' + f(a[1] - dy - .3) + 'L' + f(b[0]) + ' ' + f(b[1] - dy - .3) + '" stroke="#c49058" stroke-width=".8" stroke-linecap="round"/>';
-    for (let q = 0; q <= n; q++) {
-      const x = a[0] + (b[0] - a[0]) * q / n, y = a[1] + (b[1] - a[1]) * q / n;
-      g += '<rect x="' + f(x - .9) + '" y="' + f(y - 7.5) + '" width="1.8" height="7.8" rx=".4" fill="#8a5a2b" stroke="#4a2e14" stroke-width=".5"/><rect x="' + f(x - .9) + '" y="' + f(y - 7.5) + '" width=".7" height="7.8" fill="#b98250"/>';
-    }
-    return g;
-  };
-  const side = j => {
-    const [a, b] = sides[j];
-    if (j !== gate) return stretch(a, b);
-    const m = t => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];      // an open gap in the middle
-    return stretch(a, m(.36)) + stretch(m(.64), b);
-  };
-  const back = [], front = [];
-  sides.forEach((sd, j) => (sd[0][1] + sd[1][1] < 0 ? back : front).push(j));
-  out += back.map(side).join('');
-  // sheep: scattered inside the paddock, never near the number disc or each other
-  const flock = [], R = S * F - 5, r3 = Math.sqrt(3);
-  for (let tries = 0; flock.length < 7 && tries < 600; tries++) {
-    const x = (r() - .5) * 2 * R, y = (r() - .5) * 2 * R, d = (y + S) / (2 * S), z = .5 + .2 * d;
-    if (Math.abs(x) > R * r3 / 2 - 6 || Math.abs(y) > R - Math.abs(x) / r3 - 1) continue;
-    if (nearDisc(x - 10 * z, y - 12 * z, x + 11 * z, y, 18)) continue;
-    if (flock.some(o => Math.abs(o.x - x) < 11 && Math.abs(o.y - y) < 6)) continue;
-    flock.push({x, y, z, flip: r() < .5, graze: r() < .6});
-  }
-  flock.sort((a, b) => a.y - b.y).forEach((o, n) => {
-    out += '<ellipse cx="' + f(o.x + 1) + '" cy="' + f(o.y + .5) + '" rx="' + f(10 * o.z) + '" ry="' + f(2.4 * o.z) + '" fill="rgba(0,0,0,.25)"/>';
-    out += '<g transform="translate(' + f(o.x) + ' ' + f(o.y - 4.4 * o.z) + ') scale(' + (o.flip ? -o.z : o.z).toFixed(2) + ' ' + o.z.toFixed(2) + ')">' +
-      (o.graze ? '<g class="graze" style="' + sync(7000, i * 900 + n * 1300) + '">' + SHEEP + '</g>' : SHEEP) + '</g>';
-  });
-  return out + front.map(side).join('');
-}
-// Flat-map scenery pictures (2026-11-18): a big brick stack on a pallet (Mudflats) and a mine (Cliffs), centred like glyph()
-const BRICKS = (() => {
-  let s = '<rect x="-13" y="7" width="26" height="2.6" rx=".6" fill="#9a7044" stroke="#4a2e14" stroke-width=".7"/>';
-  [[0, 4], [1, 3], [2, 2], [3, 1]].forEach(([row, n]) => { for (let q = 0; q < n; q++) {
-    const x = (q - (n - 1) / 2) * 6.2 - 2.9, y = 3.2 - row * 4;
-    s += '<rect x="' + x.toFixed(1) + '" y="' + y + '" width="5.8" height="3.8" rx=".4" fill="' + ['#d27d50', '#b9633a', '#c46e43'][(q + row) % 3] + '" stroke="#4e230f" stroke-width=".7"/><path d="M' + (x + .6).toFixed(1) + ' ' + (y + .7) + 'h4.6" stroke="#ffd0b0" stroke-width=".6" opacity=".7"/>';
-  } });
-  return s;
-})();
-const MINE = '<path d="M-17 10C-17 0-12-9-4-12C3-15 11-11 15-3C17 2 17 6 17 10Z" fill="#8f8a84" stroke="#3d4350" stroke-width="1"/><path d="M4-13C11-11 16-4 17 10H7Z" fill="#6f6a64"/>' +
-  '<path d="M-6 10V1Q0-7 6 1V10Z" fill="#0b0806"/><rect x="-8" y="-1" width="2.2" height="11" fill="#6a4a2a"/><rect x="5.8" y="-1" width="2.2" height="11" fill="#5a3d22"/><rect x="-9" y="-3" width="18" height="2.6" rx=".5" fill="#7a5634" stroke="#3a2614" stroke-width=".5"/>' +
-  '<rect class="flick" x="-1" y=".2" width="2" height="2.6" rx=".4" fill="#ffc45a"/>' +
-  '<path d="M-3 10L-9 18M3 10L9 18" stroke="#7a8088" stroke-width="1.1"/><path d="M-4.2 12h8.4M-5.6 14h11.2M-7 16h14" stroke="#6a4a2a" stroke-width="1"/>' +
-  '<rect x="-4.4" y="9.6" width="8.8" height="4.6" rx=".8" fill="#5a5f66" stroke="#2a2a2e" stroke-width=".7"/><circle cx="-2.6" cy="14.6" r="1.2" fill="#2a2a2e"/><circle cx="2.6" cy="14.6" r="1.2" fill="#2a2a2e"/>' +
-  '<circle cx="-1.6" cy="9.2" r="1.7" fill="#a2a5ab"/><circle cx="1.4" cy="9" r="1.6" fill="#8d9096"/><circle cx="0" cy="8" r="1.3" fill="#b3b6bc"/>';
-function scene(t, i) {
-  if (t === 'grain') return wheat(i);
-  if (t === 'wood') return forest(i);
-  if (t === 'wool') return pasture(i);
-  const item = k => {
-    if (t === 'clay' && (i + k) % 2) return '<ellipse cx="0" cy="4" rx="9" ry="4" fill="#7c3c1c" opacity=".55"/><path d="M-6 3l4 2 3-3 5 2" stroke="#5a2a14" stroke-width="1" fill="none"/>';
-    if (t === 'clay') return BRICKS;                            // a big stack of bricks on a pallet
-    if (t === 'stone' && k === (i % 2 ? 3 : 4)) return MINE;    // a mine on one front side
-    return glyph(t);
-  };
-  return SCENE.map(([x, y, sc], k) => '<ellipse cx="' + x + '" cy="' + (y + 8 * sc).toFixed(1) + '" rx="' + (8 * sc).toFixed(1) + '" ry="' + (2.6 * sc).toFixed(1) + '" fill="rgba(0,0,0,.22)"/>' + '<g transform="translate(' + x + ' ' + y + ') scale(' + sc + ')">' + item(k) + '</g>').join('');
-}
+const ICONY = 19, DISCY = 12;      // flat map: the resource icon sits ICONY above a land's middle, the number disc DISCY below
+// (2026-11-21, Rick: the flat map is simple now: each land shows just its resource icon above the number, see drawBoard.
+// The old flat scenery (forest, wheat field, pasture with sheep, brick stacks, mine) was removed; it is in git history.)
 // Shared paint for the board: a gradient per land, the number discs, and a blur for the island's shadow
 const DEFS = '<defs>' + Object.keys(COL).map(t => '<linearGradient id="g-' + t + '" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="' + COL[t][0] + '"/><stop offset="1" stop-color="' + COL[t][1] + '"/></linearGradient>').join('') +
   '<linearGradient id="g-fieldlight" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#fff6c8" stop-opacity=".22"/><stop offset=".55" stop-color="#fff6c8" stop-opacity="0"/><stop offset="1" stop-color="#3a2405" stop-opacity=".3"/></linearGradient>' +
@@ -772,7 +609,7 @@ function chase2D(c) {
   drawBoard();      // take the bandit off the board while this copy runs
   const NS = 'http://www.w3.org/2000/svg', make = html => { const e = document.createElementNS(NS, 'g'); e.innerHTML = html; layer.appendChild(e); return e; };
   const P = (x, y, r, sx, sy) => 'translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + (r || 0) + 'deg) scale(' + (sx == null ? 1 : sx) + ',' + (sy == null ? 1 : sy) + ')';
-  const opt = {duration: CHASE2MS, fill: 'both'}, ax = A.x, ay = A.y - 4, bx = B.x, by = B.y - 4, dir = bx < ax ? -1 : 1, kx = ax - dir * 22;
+  const opt = {duration: CHASE2MS, fill: 'both'}, ax = A.x, ay = A.y - 4 + (G.hex[c.from].n ? DISCY : 0), bx = B.x, by = B.y - 4 + (G.hex[c.to].n ? DISCY : 0), dir = bx < ax ? -1 : 1, kx = ax - dir * 22;
   const ring = make('<ellipse rx="10" ry="4" fill="none" stroke="#fff4d6" stroke-width="2.5"/>');
   ring.animate([{offset: 0, transform: P(kx, ay + 17, 0, .2, .2), opacity: 0}, {offset: .22, transform: P(kx, ay + 17, 0, .2, .2), opacity: 0}, {offset: .23, transform: P(kx, ay + 17, 0, .3, .3), opacity: .9},
     {offset: .42, transform: P(kx, ay + 17, 0, 3.5, 3.5), opacity: 0}, {offset: 1, transform: P(kx, ay + 17, 0, 3.5, 3.5), opacity: 0}], opt);
@@ -887,13 +724,15 @@ function drawBoard() {
     s += '<polygon class="hex" points="' + corners(h, TILE) + '" fill="url(#g-' + t.t + ')"><title>' + landName(t.t) + (t.n ? ': gives ' + RN[t.t] + ' on a roll of ' + t.n : ': gives nothing') + '</title></polygon>';
     s += '<polygon class="deco" points="' + corners(h, TILE - .06) + '" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="1.5"/>';
     if (!t.n) { s += '<g class="deco" transform="translate(' + h.x.toFixed(1) + ' ' + h.y.toFixed(1) + ')">' + LAIR + '</g>'; return; }
-    s += '<g class="deco" transform="translate(' + h.x.toFixed(1) + ' ' + h.y.toFixed(1) + ')">' + scene(t.t, i) + '</g>';
-    // the number disc sits in the exact middle of the tile
-    s += '<ellipse class="deco" cx="' + (h.x + 2).toFixed(1) + '" cy="' + (h.y + 4) + '" rx="16" ry="15" fill="rgba(0,0,0,.35)"/><circle class="deco" cx="' + h.x.toFixed(1) + '" cy="' + (h.y + 2.5) + '" r="15" fill="#8d7b4d"/>';
-    s += '<circle class="deco tok" cx="' + h.x.toFixed(1) + '" cy="' + h.y + '" r="15"/>';
-    s += '<text class="deco num' + (pips(t.n) === 5 ? ' hot' : '') + '" x="' + h.x.toFixed(1) + '" y="' + (h.y + 4) + '">' + t.n + '</text>';
+    // (2026-11-21, Rick: simple flat map) the land's resource icon in the upper half, the number disc below the middle
+    const iy = h.y - ICONY, y = h.y + DISCY;
+    s += '<ellipse class="deco" cx="' + h.x.toFixed(1) + '" cy="' + (iy + 14).toFixed(1) + '" rx="13" ry="3.2" fill="rgba(0,0,0,.22)"/>' +
+      '<g class="deco" transform="translate(' + h.x.toFixed(1) + ' ' + iy.toFixed(1) + ') scale(1.35)">' + cardGlyph(t.t) + '</g>';
+    s += '<ellipse class="deco" cx="' + (h.x + 2).toFixed(1) + '" cy="' + (y + 4) + '" rx="16" ry="15" fill="rgba(0,0,0,.35)"/><circle class="deco" cx="' + h.x.toFixed(1) + '" cy="' + (y + 2.5) + '" r="15" fill="#8d7b4d"/>';
+    s += '<circle class="deco tok" cx="' + h.x.toFixed(1) + '" cy="' + y + '" r="15"/>';
+    s += '<text class="deco num' + (pips(t.n) === 5 ? ' hot' : '') + '" x="' + h.x.toFixed(1) + '" y="' + (y + 4) + '">' + t.n + '</text>';
     const n = pips(t.n);
-    for (let k = 0; k < n; k++) s += '<circle class="deco" cx="' + (h.x + (k - (n - 1) / 2) * 4).toFixed(1) + '" cy="' + (h.y + 9.5) + '" r="1.2" fill="' + (n === 5 ? '#c62828' : '#5b4a2a') + '"/>';
+    for (let k = 0; k < n; k++) s += '<circle class="deco" cx="' + (h.x + (k - (n - 1) / 2) * 4).toFixed(1) + '" cy="' + (y + 9.5) + '" r="1.2" fill="' + (n === 5 ? '#c62828' : '#5b4a2a') + '"/>';
   });
   if (HARV && Date.now() < HARV.t + 1600) HARV.h.forEach(i => {      // lands that just paid out glow
     s += '<polygon class="deco hglow" style="animation-delay:' + (HARV.t - Date.now()) + 'ms" points="' + corners(HEX[i], TILE) + '"/>';
@@ -903,7 +742,7 @@ function drawBoard() {
     s += '<polygon class="deco" points="' + corners(h, TILE) + '" fill="rgba(12,18,34,.45)"/>';
     const bl = blocking(), late = bl ? BLOCK.t - Date.now() : 0;      // (its number came up: red glow and hops, see harvestFx)
     if (bl) s += '<polygon class="deco bglow" style="animation-delay:' + late + 'ms" points="' + corners(h, TILE) + '"/>';
-    if (!chase2Busy()) s += '<g class="deco" transform="translate(' + h.x.toFixed(1) + ' ' + (h.y - 4).toFixed(1) + ')">' +
+    if (!chase2Busy()) s += '<g class="deco" transform="translate(' + h.x.toFixed(1) + ' ' + (h.y - 4 + (G.hex[G.storm].n ? DISCY : 0)).toFixed(1) + ')">' +
       (bl ? '<g class="bhop" style="animation-delay:' + late + 'ms">' + drop('storm', G.storm, BANDIT) + '</g>' : drop('storm', G.storm, BANDIT)) + '</g>';      // (a Guard's chase draws its own)
   }
   // the longest route (2026-11-19): a plain gold edge under its roads and a thin gold line along them (still: the flat map

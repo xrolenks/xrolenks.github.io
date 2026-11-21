@@ -105,15 +105,8 @@ body[data-pack="night"] #view:not(.is3d)::before{content:"";position:absolute;in
 .f5{transform:rotateX(90deg) translateZ(calc(var(--s) / 2))}
 .f2{transform:rotateX(-90deg) translateZ(calc(var(--s) / 2))}
 @media(max-width:600px){.d3{--s:26px}}
-/* wheat rows lean with the wind, a row at a time, so a wave rolls across the field */
-.sway{animation:sway 3.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
-@keyframes sway{0%,100%{transform:skewX(0)}50%{transform:skewX(-7deg)}}
-.sway.tree{animation-name:swayt;animation-duration:5.2s}      /* trees lean less and slower than wheat */
-.graze{animation:graze 7s ease-in-out infinite;transform-box:fill-box;transform-origin:30% 100%}      /* a sheep dips its head to eat */
-@keyframes graze{0%,55%,100%{transform:rotate(0)}63%,88%{transform:rotate(9deg)}}
 .bob{animation:bob 1.7s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}      /* a boat rocking on the water */
 @keyframes bob{0%,100%{transform:translateY(0) rotate(-1.5deg)}50%{transform:translateY(1.2px) rotate(1.5deg)}}
-@keyframes swayt{0%,100%{transform:skewX(0)}50%{transform:skewX(-2.5deg)}}
 .flick{animation:flick .45s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:50% 100%}      /* torch and campfire flames */
 @keyframes flick{to{transform:scale(.82,1.14);opacity:.85}}
 .smoke{animation:smoke 4s ease-out infinite;transform-box:fill-box;transform-origin:50% 50%}      /* campfire smoke drifting up */

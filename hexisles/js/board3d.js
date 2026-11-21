@@ -8,7 +8,10 @@
 // pinned version, see the import map in <head>); without it the flat map is used.
 const VIEWKEY = 'hexisles-view';      // localStorage: '2d' if the player switched the 3D view off
 const TOP = 9;                        // height of a land tile's top (sea level is 0, the beach 3)
-function want3D() { try { return localStorage.getItem(VIEWKEY) !== '2d'; } catch (e) { return true; } }
+// Phones and tablets (a touch screen and no mouse) start on the flat map (Rick, 2026-11-21); the 3D button still
+// switches, and that choice is remembered ('3d' or '2d').
+const onMobile = () => !!(window.matchMedia && matchMedia('(hover: none) and (pointer: coarse)').matches);
+function want3D() { try { const v = localStorage.getItem(VIEWKEY); return v ? v !== '2d' : !onMobile(); } catch (e) { return !onMobile(); } }
 // Graphics: Fast (the default) or Fancy (Rick's request, 2026-11-20). Fast = no shadows, the sea reflects only the sky,
 // and a less sharp picture (pixel ratio 1); Fancy = all of it (pixel ratio up to 1.5). Picked in Settings (settings.js),
 // localStorage GFXKEY = 'fancy' (anything else = Fast). D3.gfx(fancy) switches a running island.
