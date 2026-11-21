@@ -89,7 +89,9 @@ async function load3D(asked) {
 
 function init3D(T, Water, Orbit, BU) {
   const view = $('view');
-  const R = new T.WebGLRenderer({antialias: true});
+  // (2026-11-21, Rick has a laptop with a built-in AMD chip and an NVIDIA RTX 5070: ask the browser for the stronger one.
+  // Chrome on Windows may still use whichever chip Windows gives it: Settings > System > Display > Graphics decides that.)
+  const R = new T.WebGLRenderer({antialias: true, powerPreference: 'high-performance'});
   // (2026-11-20, Rick's laptop froze: sharpness is capped at 1.5x and lowered by frame() if the graphics chip can't keep up)
   let FANCY = gfxFancy();      // (Graphics setting: Fast or Fancy, see GFXKEY)
   let PR = Math.min(devicePixelRatio || 1, FANCY ? 1.5 : 1);
@@ -1272,6 +1274,14 @@ function init3D(T, Water, Orbit, BU) {
   // Nothing (or only castles) to raid: it sails away. Raiders won: it waits until every loser has chosen a fort,
   // then fire arrows fly at those forts, they burn, crumble into the ground and a town drops in where each stood;
   // then the fleet sails off. Until then the sacked forts are still drawn as forts (raidHeld, used in dynamic()).
+  // The fleet's step closer (FGLIDE, set in dynamic()): FGLIDEMS long, easing in and out; the flat map just jumps.
+  const FGLIDEMS = 2400;
+  let FGLIDE = null, PREVF = null;
+  function fleetGlide(now) {
+    const q = Math.max(0, Math.min(1, (now - FGLIDE.t0) / FGLIDEMS)), k = q * q * (3 - 2 * q), {from, to} = FGLIDE;
+    FLEET.position.set(from[0] + (to[0] - from[0]) * k, 0, from[1] + (to[1] - from[1]) * k);
+    if (q >= 1) FGLIDE = null;
+  }
   const PILLMS = 3600, RAIDIN = 3000, RAIDOUT = 3800;
   let RAID = null, FLEETYAW = null;      // (FLEETYAW: the fleet's usual heading, kept on the first raid)
   const raidHeld = () => RAID && RAID.r === 'lost' && G.raidfx && G.raidfx.n === RAID.n ? (G.raidfx.v || []).filter(v => !RAID.done[v]) : [];
@@ -1388,7 +1398,7 @@ function init3D(T, Water, Orbit, BU) {
     const keys = Object.keys(Q.kn).sort((a, c) => a - c), N = keys.length;
     keys.forEach((e, j) => {
       const g = Q.kn[e], u = g.userData, row = j < 7 ? 0 : 1, col = row ? j - 7 : j, cols = row ? N - 7 : Math.min(N, 7);
-      const slot = at(row ? -8 : 1, (col - (cols - 1) / 2) * 9, row ? TOP + 2.4 : 3.5);
+      const slot = at(row ? -8 : 1, (col - (cols - 1) / 2) * 9, row ? TOP + 1 : 3.5);
       const go = ease(cl(200 + j * 80, 1700 + j * 80)), back = won ? ease(cl(4300, 5300)) : ease(cl(3700, 4800));
       const A = back > 0 ? slot : u.home, B = back > 0 ? u.home : slot, k = back > 0 ? back : go;
       g.position.lerpVectors(A, B, k);
@@ -1446,6 +1456,7 @@ function init3D(T, Water, Orbit, BU) {
         for (let k = 0; k < 4; k++) { const s = new T.Mesh(G3.ball, SOOT); F.grp.add(noRef(s)); F.smoke.push(s); }
         const r = new T.Mesh(RING.geometry, RING.material.clone()); F.grp.add(r); F.ring = r;
         scene.add(F.grp);
+        if (j < 2) SFX.sack(0);      // (in 3D the sack sound plays here, timed to the arrows and the crumble; see sfx() in sound.js)
       }
       // fire arrows arc from the fleet onto the fort
       F.arrows.forEach((a, k) => {
@@ -1493,8 +1504,48 @@ function init3D(T, Water, Orbit, BU) {
       if (TK.gFort) TK.gFort.visible = k < .66;
     }
   }
+  // A knight waking for duty or being trained (Rick, 2026-11-21; 3D only, the flat map keeps the drop). Instead of
+  // dropping in again: WAKE (in time with duty.wav): the resting knight breathes slowly (the snore), jolts awake at .85 s,
+  // hops up to attention and lands at 1.08 s with a gold ring at its feet and a sparkle (the chime).
+  // PROMOTE (in time with train.wav / mighty.wav): the old knight hops on each "ba-da-ba" note while turning, then at the
+  // "bum" it vanishes in a flash and the new, stronger knight grows up spinning, with a gold ring.
+  // KFX = corner -> {kind, t0, was (old {p, s, a})}, KFXS = this draw's animations (kfxPose, from frame()).
+  const KFXMS = {wake: 1650, promote: 1450, mighty: 1750}, KFX = {}, KFXS = [];
+  let PREVG = {}, KFLASH = null;
+  function kfxPose(u, now) {
+    const t = (now - u.t0) / 1000, {g, old, ring, flash, s0, y0, r0} = u;
+    const ring1 = (a, len, big) => { const q = (t - a) / len; ring.visible = q > 0 && q < 1; if (ring.visible) { ring.scale.setScalar(5 + q * big); ring.material.opacity = .85 * (1 - q); } };
+    const flash1 = (a, len, big) => { const q = (t - a) / len; flash.visible = q > 0 && q < 1; if (flash.visible) { flash.scale.setScalar(big * Math.sin(q * Math.PI)); flash.material.opacity = 1 - q * .6; } };
+    if (u.kind === 'wake') {
+      old.visible = t < .85; g.visible = !old.visible;
+      if (old.visible) { const b = Math.sin(t / .75 * Math.PI); old.scale.set(s0 * (1 + b * .03), s0 * (1 + b * .06), s0 * (1 + b * .03)); old.rotation.z = t > .78 ? Math.sin(t * 90) * .06 : 0; }
+      const j = (t - .85) / .23, l = (t - 1.08) / .17;
+      g.position.y = y0 + (j > 0 && j < 1 ? Math.sin(j * Math.PI) * 7 : 0);
+      const sq = l > 0 && l < 1 ? Math.sin(l * Math.PI) * .14 : j > 0 && j < 1 ? -.08 : 0;      // stretched in the air, squashed on landing
+      g.scale.set(s0 * (1 + sq * .6), s0 * (1 - sq), s0 * (1 + sq * .6));
+      ring1(1.08, .5, 22); flash1(1.16, .4, 16);
+      flash.position.set(g.position.x, y0 + 16 * s0 / 1.75, g.position.z);
+    } else {
+      const B = u.kind === 'mighty' ? .36 : .32, grow = Math.min(1, Math.max(0, (t - B) / .38));
+      old.visible = t < B; g.visible = t >= B;
+      if (old.visible) { const h = Math.abs(Math.sin(t / .1 * Math.PI)); old.position.y = y0 + h * (2 + t * 9); old.rotation.y = u.r0old + t / B * Math.PI; }
+      g.scale.setScalar(s0 * Math.max(.001, backOut(grow)));
+      g.rotation.y = r0 + (1 - grow) * Math.PI * 1.5;
+      ring1(B, .6, u.kind === 'mighty' ? 34 : 24); flash1(B - .04, .5, u.kind === 'mighty' ? 46 : 30);
+      flash.position.set(g.position.x, y0 + 10, g.position.z);
+    }
+    ring.position.set(g.position.x, y0 + .8, g.position.z);
+  }
+  function kfxAdd(e, g, f, now) {      // set up this draw's copy of a running knight animation (g: the new knight, already in dyn)
+    const old = guard3D(e, f.kind === 'wake' ? Object.assign({}, G.gd[e], {a: 0}) : Object.assign({}, G.gd[e], f.was)); dyn.add(old);
+    const ring = new T.Mesh(RING.geometry, RING.material.clone()); ring.material.color.setHex(0xffd34a); dynJunk.push(ring.material); dyn.add(ring);
+    KFLASH = KFLASH || new T.SpriteMaterial({map: glowTex, color: 0xffe9a0, transparent: true, depthWrite: false, blending: T.AdditiveBlending});
+    const flash = new T.Sprite(KFLASH.clone()); dynJunk.push(flash.material); dyn.add(noRef(flash));
+    const u = {kind: f.kind, t0: f.t0, g, old, ring, flash, s0: g.scale.x, y0: g.position.y, r0: g.rotation.y, r0old: old.rotation.y};
+    KFXS.push(u); kfxPose(u, now);
+  }
   function dynamic() {
-    dynJunk.forEach(o => o.dispose()); dynJunk = []; DROPS = []; TK = {};
+    dynJunk.forEach(o => o.dispose()); dynJunk = []; DROPS = []; TK = {}; KFXS.length = 0;
     dyn.clear(); hits.clear();
     TILES3.forEach((o, i) => o.top.color.setScalar(i === G.storm ? .5 : 1));
     for (const e in G.r) {
@@ -1512,7 +1563,7 @@ function init3D(T, Water, Orbit, BU) {
     });
     ghostOff();      // (the board changed: the preview is rebuilt on the next pointer move)
     DSMOKE.length = 0; DFLAGS.length = 0; UPGS.length = 0; FOLK.length = 0;
-    if (PREVID !== G.id) { PREVID = G.id; PREVL = {}; for (const k in UPG) delete UPG[k]; }
+    if (PREVID !== G.id) { PREVID = G.id; PREVL = {}; PREVG = null; for (const k in UPG) delete UPG[k]; for (const k in KFX) delete KFX[k]; }
     const now = Date.now(), held = raidHeld();
     if (RAID) { RAID.forts = {}; RAID.kn = {}; }
     for (const v in G.b) {
@@ -1564,12 +1615,28 @@ function init3D(T, Water, Orbit, BU) {
     // the knights who were on duty when the raiders came (G.raidfx.k) fight on the beach and only lie down to rest
     // once the battle is over, though the rules already rested them (Rick, 2026-11-19)
     const fought = RAID && !RAID.bdone && G.raidfx && G.raidfx.n === RAID.n ? (G.raidfx.k || []) : [];
+    const prevG = PREVG; PREVG = {};
     for (const e in guards()) {      // (resting guards are grey, see guard3D)
       const f = fought.includes(+e), g = guard3D(e, f ? Object.assign({}, G.gd[e], {a: 1}) : G.gd[e]); dyn.add(g);
-      if (!f) dropIn('g' + e, g);
+      // woken or trained since the last draw (not on a load: prevG is null then): its own animation, not a drop
+      const cur = G.gd[e], was = prevG && prevG[e], fresh = now - (FELL['g' + e] || 0) < DROPMS;
+      PREVG[e] = {p: cur.p, s: cur.s, a: cur.a};
+      if (was && fresh && was.p === cur.p && (cur.s > was.s || (cur.a && !was.a))) KFX[e] = {kind: cur.s > was.s ? (cur.s >= 3 ? 'mighty' : 'promote') : 'wake', t0: FELL['g' + e], was};
+      const kf = KFX[e];
+      if (kf && now - kf.t0 >= KFXMS[kf.kind]) delete KFX[e];
+      if (!f && KFX[e]) kfxAdd(e, g, KFX[e], now);
+      else if (!f) dropIn('g' + e, g);
       if (f) { RAID.kn[e] = g; g.userData.home = g.position.clone(); g.userData.rot = g.rotation.y; g.userData.mt = G.gd[e].s > 1; }      // (on duty: they go and fight the raiders)
     }
-    if (G.fg) { const [fx, fz] = fleetAt(G.fleet || 0); if (!RAID) FLEET.position.set(fx * 1.15, 0, fz * 1.15); dyn.add(FLEET); }
+    if (G.fg) {
+      const [fx, fz] = fleetAt(G.fleet || 0), n = G.fleet || 0, pf = PREVF;
+      PREVF = {id: G.id, n, rolls: G.rolls || 0};
+      // the raiders sail one step closer: glide there in time with raiders.wav, starting as the dice land (Rick, 2026-11-21)
+      if (pf && pf.id === G.id && n > pf.n && !RAID) FGLIDE = {from: [FLEET.position.x, FLEET.position.z], to: [fx * 1.15, fz * 1.15], t0: now + (PREVF.rolls !== pf.rolls ? DICEMS : 0)};
+      if (RAID) FGLIDE = null;
+      if (!RAID && !FGLIDE) FLEET.position.set(fx * 1.15, 0, fz * 1.15);
+      dyn.add(FLEET);
+    }
     const what = placing(), hit = (geo, mat, u, x, y, z, sx, sy, sz, ry) => {
       const m = new T.Mesh(geo, mat); m.position.set(x, y, z); if (sx) m.scale.set(sx, sy, sz); if (ry) m.rotation.y = ry; m.userData = u; hits.add(m); return m;
     };
@@ -1899,7 +1966,7 @@ function init3D(T, Water, Orbit, BU) {
       const ride = new T.Group(); mounted(ride, g); grp.add(ride);
       grp.rotation.y = -.35;      // facing right, turned a little towards you
       grp.scale.setScalar(1.2);
-      grp.position.set(x, TOP + 2.4, z);
+      grp.position.set(x, TOP + 1, z);
       return grp;
     }
     part(grp, GG.base, M3.stone, 0, 0, 0);
@@ -1933,7 +2000,7 @@ function init3D(T, Water, Orbit, BU) {
     part(sw, SWORD.pommel, M3.gold, 0, 0, 0); part(sw, SWORD.grip, M3.hat, 0, 0, 0); part(sw, SWORD.guard, M3.gold, 0, 0, 0);
     part(sw, SWORD.blade, M3.shine, 0, 0, 0); part(sw, SWORD.fuller, M3.steel, 0, 0, 0);
     grp.scale.setScalar(1.75);
-    grp.position.set(x, TOP + 2.4, z);
+    grp.position.set(x, TOP + 1, z);
     return grp;
   }
   let SAIL = null;
@@ -2234,7 +2301,7 @@ function init3D(T, Water, Orbit, BU) {
     if (!D3.on || HOLD) { clock.getDelta(); return; }
     // (60 a second only if a frame costs the processor little: on Rick's laptop each took ~20-25 ms, so 60 a
     // second during the intro left no time for anything else and Chrome froze; RMS = average cost, measured below)
-    const busy = !LOWQ && RMS < 9 && (INTRO || DROPS.length || DICE3 || CHASE || RAID || SAIL || PARTY || TK.gNew || UPGS.length);
+    const busy = !LOWQ && RMS < 9 && (INTRO || DROPS.length || DICE3 || CHASE || RAID || SAIL || PARTY || TK.gNew || UPGS.length || KFXS.length || FGLIDE);
     const gap = 1000 / (!$('m-setup').hidden ? 12 : busy ? 60 : 30);
     if (ts - LASTF < gap - 4) return;
     if (LASTF && document.visibilityState === 'visible') {      // is the chip keeping up?
@@ -2324,6 +2391,8 @@ function init3D(T, Water, Orbit, BU) {
     });
     if (INTRO) introStep(now);
     if (UPGS.length) { SHADOW = true; UPGS.forEach(u => upgPose(u, now)); if (UPGS.some(u => now - u.t0 >= UPGMS)) dynamic(); }
+    if (KFXS.length) { SHADOW = true; KFXS.forEach(u => kfxPose(u, now)); if (KFXS.some(u => now - u.t0 >= KFXMS[u.kind])) dynamic(); }
+    if (FGLIDE) fleetGlide(now);
     if (RAID) raidStep(now);
     if (CLOUDS) cloudsStep(now);
     if (SAIL) sailStep(now);

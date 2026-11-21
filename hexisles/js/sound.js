@@ -11,7 +11,7 @@
 const VOLKEY = 'hexisles-vol', SFXDIR = 'sound-effects/';
 const SOUNDS = ['click', 'dice', 'road', 'town', 'fort', 'wall', 'harvest', 'coins', 'bell', 'card', 'sparkle', 'play',
   'bandit', 'stomp', 'swipe', 'pop', 'yes', 'no', 'blip', 'award', 'win', 'turn', 'firework',
-  'raiders', 'warhorn', 'guard', 'duty', 'train', 'mighty', 'sack', 'knight'];      // raiders to knight: Forts and Knights
+  'raiders', 'warhorn', 'guard', 'duty', 'train', 'mighty', 'sack', 'knight', 'victory'];      // raiders to victory: Forts and Knights
 // building sounds wait for the piece to land (pieces drop in over DROPMS and touch down at ~68% of it)
 const LANDS = {road: 1, town: 1, fort: 1, wall: 1}, LANDAT = .44;
 let VOL = 60;
@@ -46,7 +46,7 @@ SOUNDS.forEach(n => { SFX[n] = at => playSound(n, at); });
 const SFXLINES = [
   [/ rolled 7\. The bandit/, 'bandit'], [/ rolled \d+\. (?!Nobody)/, 'harvest'],
   [/ built a road\./, 'road'], [/ founded a town| built a town\./, 'town'], [/ raised a fort\./, 'fort'], [/ built a wall\./, 'wall'],
-  [/raiders sail closer/, 'raiders'], [/raiders landed/, 'warhorn'], [/drove them off/, 'award'], [/sacked a fort/, 'sack'], [/treasure washed ashore! (?!Nobody)/, 'coins'],
+  [/raiders sail closer/, 'raiders'], [/raiders landed/, 'warhorn'], [/drove them off/, 'victory'], [/sacked a fort/, 'sack'], [/treasure washed ashore! (?!Nobody)/, 'coins'],
   [/ hired a knight/, 'guard'], [/ trained a mighty knight/, 'mighty'], [/ trained a knight/, 'train'], [/ put them on duty| now on duty/, 'duty'], [/ to a Keep| raised a Citadel| founded a fort/, 'fort'],
   [/ banner: | castle: | the .* castle from |castle is now permanent| (built|took) the (Grand Library|Grand Market|Mighty Castle)| is now permanent/, 'award'], [/ to level \d/, 'sparkle'], [/ draws? a progress card/, 'card'],
   [/ sent the bandit /, 'stomp'], [/ robbed /, 'swipe'], [/ handed .* a card\.| discarded /, 'card'],
@@ -67,6 +67,13 @@ function sfx() {
     if (s.said <= was.said) return;
     const m = SFXLINES.find(([re]) => re.test(t));
     if (!m || (m[1] === 'stomp' && chased)) return;      // the knight's chase has its own sounds
+    const in3d = D3.on && D3.ready;
+    if (m[1] === 'sack' && in3d) return;      // on the 3D island the pillage plays it as each fort is hit (pillStep in board3d.js)
+    if (m[1] === 'victory') {      // the trumpet as the raiders are beaten (in 3D: once the fleet has landed and the knights win the battle),
+      const at = late + (in3d ? 6.7 : 0);      // then the award sound for a Hero of the Isles
+      SFX.victory(at); if (/Hero of the Isles/.test(t)) SFX.award(at + 2.4);
+      return;
+    }
     SFX[m[1]](late + (m[1] === 'harvest' ? 1 : 0) + (LANDS[m[1]] ? LANDAT : 0));      // harvest: as the cards arrive; buildings: as they land
   });
   if (s.ship !== was.ship && G.ship) SFX.bell(0);

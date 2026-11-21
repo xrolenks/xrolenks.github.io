@@ -46,6 +46,23 @@ $('set-gfx').onclick = e => {
   if (D3.gfx) D3.gfx(b.dataset.g === 'fancy');
 };
 fillGfx();
-$('setbtn').onclick = () => { const p = $('setpop'); p.hidden = !p.hidden; $('setbtn').setAttribute('aria-expanded', String(!p.hidden)); };
+// Which graphics chip draws the 3D island (Rick, 2026-11-21: his laptop drew on its built-in chip, not its NVIDIA card).
+// Shown under Graphics when the menu opens, with the "Have a gaming graphics card?" steps below it (#set-gpu, index.html).
+// Browsers may hide the real name (then nothing is shown). Read from the 3D island's own context, so no extra one is made.
+function chipName() {
+  try {
+    if (!D3.ready || !D3.three) return '';
+    const gl = D3.three.R.getContext(), x = gl.getExtension('WEBGL_debug_renderer_info');
+    let n = x ? gl.getParameter(x.UNMASKED_RENDERER_WEBGL) : '';
+    const m = /^ANGLE \([^,]*, (.*)\)$/.exec(n); if (m) n = m[1];      // "ANGLE (AMD, AMD Radeon(TM) Graphics (0x1114) Direct3D11 ..., D3D11)"
+    n = n.replace(/^ANGLE \w+ Renderer: /, '');      // (Macs: "ANGLE Metal Renderer: Apple M2, ...")
+    return n.replace(/,.*$/, '').replace(/ \(0x[0-9a-f]+\)/i, '').replace(/ (Direct3D|OpenGL|Vulkan|Metal).*$/i, '').replace(/\((TM|R)\)/gi, '').trim();
+  } catch (e) { return ''; }
+}
+function fillChip() {
+  const n = chipName(), weak = /intel|uhd|iris|radeon graphics|vega \d|llvmpipe|swiftshader|software/i.test(n) && !/nvidia|geforce|rtx|gtx|radeon rx|arc a/i.test(n);
+  $('set-chip').textContent = n ? 'Drawing on: ' + n + (weak ? ' (a built-in chip)' : '') : '';
+}
+$('setbtn').onclick = () => { const p = $('setpop'); p.hidden = !p.hidden; $('setbtn').setAttribute('aria-expanded', String(!p.hidden)); if (!p.hidden) fillChip(); };
 document.addEventListener('pointerdown', e => { if (!e.target.closest('#sets')) { $('setpop').hidden = true; $('setbtn').setAttribute('aria-expanded', 'false'); } }, true);
 
