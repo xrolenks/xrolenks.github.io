@@ -13,18 +13,19 @@ let NET = {role: null, rheld: {}, rpress: []};
 function makeFighter(def, side) {
   return {def, side, x: 0, y: GROUND, vx: 0, vy: 0, face: 1, hp: 100, trail: 100, state: 'idle', t: 0,
     move: null, moveHit: false, onGround: true, airAttacked: false, cd: 0, stun: 0, flash: 0,
-    combo: 0, comboShow: 0, walkPhase: 0, blockLow: false, buf: {}, held: {}, ai: {q: []}};
+    combo: 0, comboShow: 0, walkPhase: 0, blockLow: false, buf: {}, held: {}, dirs: [], ai: {q: []}};
 }
 function resetFighter(f) {
   Object.assign(f, {x: f.side ? 660 : 300, y: GROUND, vx: 0, vy: 0, face: f.side ? -1 : 1, hp: 100, trail: 100,
     state: 'idle', t: 0, move: null, moveHit: false, onGround: true, airAttacked: false, cd: 0, stun: 0, flash: 0,
-    combo: 0, comboShow: 0, buf: {}, held: {}, ai: {q: []}});
+    combo: 0, comboShow: 0, buf: {}, held: {}, dirs: [], ai: {q: []}});
 }
 
 function startMatch() {
   G.fighters = [makeFighter(FIGHTERS[G.picks[0]], 0), makeFighter(FIGHTERS[G.picks[1]], 1)];
   G.wins = [0, 0];
   G.round = 1;
+  practiceReset();
   startRound();
   show('game');
 }
@@ -51,32 +52,110 @@ function endRound(timeout) {
 // ===== Fighter logic =====
 const ACTIONABLE = new Set(['idle', 'walk', 'crouch', 'block', 'cblock']);
 const FLOORED = new Set(['knockdown', 'ko', 'down']);
-function setState(f, s) { f.state = s; f.t = 0; if (s !== 'attack') f.move = null; }
+const clampF = k => Math.max(0, Math.min(1, k));
+const JUGGLE_MAX = 5;      // 'juggle' = launched into the air and still hittable (see applyHit)
+function setState(f, s) {
+  if (s !== 'jump') f.flip = 0;      // an air attack or a hit ends the jump's flip (the rest of the jump is just the tuck)
+  f.state = s; f.t = 0; if (s !== 'attack') f.move = null;
+}
 function keep(f, s) { if (f.state !== s) setState(f, s); }
 function want(f, b) { if (f.buf[b] > 0) { f.buf[b] = 0; return true; } return false; }
-function canThrow(f) { return f.onGround && (ACTIONABLE.has(f.state) || f.state === 'attack'); }
+function canThrow(f) { return f.onGround && (ACTIONABLE.has(f.state) || f.state === 'attack' || f.state === 'charging'); }
 
-function startMove(f, m) {
+function startMove(f, m, chain = null) {
   setState(f, 'attack');
-  f.move = m; f.moveHit = false;
+  f.move = m; f.moveHit = false; f.pendSpecial = null;
+  f.blockedExtra = 0;      // extra recovery frames if this move gets blocked (BLOCK_PUNISH)
+  f.hitN = 0; f.lastHitT = 0;      // multi-hit moves: hits so far, and when the last one was
+  practiceMove(f, m);      // practice mode: frame data card for this move
+  f.chain = chain;      // buttons pressed so far in a combo string (only set for plain punch/kick and string moves)
   if (f.onGround) f.vx = 0;
   if (!MOVES[m].projectile) SFX.whoosh();
 }
+
+// ===== Special move sequences (directions, then punch or kick) =====
+// Each frame we note which way the stick points, *relative to the rival*: up, down, fwd (toward them), back.
+// A diagonal counts as both (down + fwd). f.dirs keeps the last few changes as {up, down, fwd, back, t}.
+function recordDirs(f, foe) {
+  const h = f.held, toward = foe.x >= f.x ? 'right' : 'left', away = toward === 'right' ? 'left' : 'right';
+  const d = {up: !!h.up, down: !!h.down, fwd: !!h[toward], back: !!h[away]};
+  const last = f.dirs[f.dirs.length - 1];
+  if (last && last.up === d.up && last.down === d.down && last.fwd === d.fwd && last.back === d.back) return;
+  d.t = G.frame;
+  f.dirs.push(d);
+  if (f.dirs.length > 12) f.dirs.shift();
+}
+// Did the fighter just point these directions, in this order, within SEQ_WINDOW frames?
+// seq = e.g. ['down', 'fwd']. Each step must be a separate change of direction (a diagonal in between is fine).
+// Returns when the motion started (the frame of its first direction; the latest match is used), or -1 if it wasn't done.
+function seqStart(f, seq) {
+  const from = G.frame - SEQ_WINDOW;
+  let start = f.dirs.length - 1;
+  while (start > 0 && f.dirs[start].t > from) start--;      // include the direction that was held when the window began
+  let k = seq.length - 1;
+  for (let i = f.dirs.length - 1; i >= start && k >= 0; i--) if (f.dirs[i][seq[k]] && --k < 0) return f.dirs[i].t;
+  return -1;
+}
+function seqDone(f, seq) { return seqStart(f, seq) >= 0; }
+// Punch or kick was pressed: if it finishes one of this fighter's special sequences, do that special.
+// When two motions both fit (e.g. down, back, forward), the one started most recently wins.
+// Which special (if any) does pressing btn now finish? Returns the move name or null.
+function pickSpecial(f, btn) {
+  const opts = [];
+  const s = f.def.special.seq;
+  if (s && s.btn === btn && f.cd <= 0 && !G.projectiles.some(p => p.owner === f)) opts.push({move: 'special', t: seqStart(f, s.dirs)});
+  for (const x of f.def.extras || []) if (x.seq.btn === btn) opts.push({move: x.move, t: seqStart(f, x.seq.dirs)});
+  const best = opts.filter(o => o.t >= 0).sort((a, b) => b.t - a.t)[0];
+  return best ? best.move : null;
+}
+function doSpecial(f, m) {
+  f.dirs = [];          // used up, so the same motion can't fire twice
+  startMove(f, m);
+  if (MOVES[m].fire) SFX.flame();
+}
+function trySpecial(f, btn) {
+  const m = pickSpecial(f, btn);
+  if (m) doSpecial(f, m);
+  return !!m;
+}
+// How long a special typed in during an attack is remembered, waiting for that attack to hit (input buffering)
+const SPECIAL_BUFFER = 30;
 
 function control(f, foe) {
   const h = f.held;
   if (f.onGround && ACTIONABLE.has(f.state)) {
     if (Math.abs(foe.x - f.x) > 2) f.face = foe.x > f.x ? 1 : -1;
-    const fwd = f.face > 0 ? 'right' : 'left';
-    if (want(f, 'punch')) {
-      if (h.down) return startMove(f, 'uppercut');
-      if (h[fwd] && Math.abs(foe.x - f.x) < 80 && canThrow(foe)) return startMove(f, 'throw');
-      return startMove(f, 'punch');
+    // punch + kick together = throw (the specials' motions come first)
+    if (f.buf.punch > 0 && f.buf.kick > 0 && !pickSpecial(f, 'punch') && !pickSpecial(f, 'kick')) {
+      f.buf.punch = f.buf.kick = 0;
+      return startThrow(f);
     }
-    if (want(f, 'kick')) return startMove(f, h.down ? 'sweep' : 'kick');
-    if (f.buf.special > 0 && f.cd <= 0 && !G.projectiles.some(p => p.owner === f)) {
-      f.buf.special = 0;
-      return startMove(f, 'special');
+    // just landed from an air punch that connected: it counts as a string's first punch, so the next press goes
+    // straight to that string's 2nd move (e.g. jump-in punch, punch, punch = cross, hook). Specials still win.
+    if (f.airStringUntil && G.frame <= f.airStringUntil) {
+      for (const b of ['punch', 'kick']) {
+        if (!(f.buf[b] > 0) || pickSpecial(f, b)) continue;
+        f.chain = ['punch'];
+        const next = nextInString(f, b);
+        if (!next) continue;
+        f.buf[b] = 0; f.airStringUntil = 0;
+        return startMove(f, next, ['punch', b]);
+      }
+    }
+    if (want(f, 'punch')) {
+      if (trySpecial(f, 'punch')) return;
+      if (h.down) return startMove(f, 'uppercut');
+      const fwd = f.face > 0 ? 'right' : 'left', back = f.face > 0 ? 'left' : 'right';
+      if (h[fwd] && f.def.fwdPunch) return startMove(f, f.def.fwdPunch);      // toward + punch = forward punch
+      if (h[back] && f.def.backCharge) { setState(f, 'charging'); f.vx = 0; f.charge = 0; f.heat = 0; return; }      // back + hold punch = charge
+      return startMove(f, 'punch', ['punch']);
+    }
+    if (want(f, 'kick')) {
+      if (trySpecial(f, 'kick')) return;
+      if (h.down) return startMove(f, 'sweep');
+      const fwd = f.face > 0 ? 'right' : 'left';
+      if (h[fwd] && f.def.fwdKick) return startMove(f, f.def.fwdKick, ['fwdKick']);      // toward + kick = forward kick
+      return startMove(f, 'kick', ['kick']);
     }
     // double-tap left or right = a short dash (toward the rival = forward dash, away = back dash)
     for (const d of ['left', 'right']) {
@@ -86,9 +165,12 @@ function control(f, foe) {
       f.lastTap = {s, t: G.frame};
     }
     if (h.up) {
-      f.onGround = false; f.vy = -f.def.jump;
-      f.vx = ((h.right ? 1 : 0) - (h.left ? 1 : 0)) * 4.2;
-      setState(f, 'jump'); f.airAttacked = false;
+      const jd = (h.right ? 1 : 0) - (h.left ? 1 : 0);
+      // straight up is lower than a jump in a direction (Rick 2026-11-21): STRAIGHT_JUMP of the take-off speed
+      f.onGround = false; f.vy = f.jumpV = -f.def.jump * (jd ? 1 : STRAIGHT_JUMP);      // jumpV: for jumpPose
+      f.vx = jd * JUMP_FWD;
+      f.flip = jd * f.face;      // 1 = jumping toward the rival (forward flip), -1 = away (back flip), 0 = straight up
+      setState(f, 'jump'); f.airAttacked = false; f.airPunchHit = false; f.airStringUntil = 0;
       SFX.jump();
       return;
     }
@@ -97,16 +179,191 @@ function control(f, foe) {
     const dir = (h.right ? 1 : 0) - (h.left ? 1 : 0);
     if (dir) { keep(f, 'walk'); f.vx = dir * f.def.speed * (dir === f.face ? 1 : 0.75); return; }
     keep(f, 'idle'); f.vx = 0;
+  } else if (f.state === 'attack' && f.onGround && f.t <= THROW_TOGETHER && !f.moveHit &&
+             ((f.move === 'punch' && f.buf.kick > 0) || (f.move === 'kick' && f.buf.punch > 0))) {
+    // the other button came a frame or two after the first: still counts as pressed together, so turn it into a throw
+    f.buf.punch = f.buf.kick = 0;
+    return startThrow(f);
+  } else if (f.state === 'attack' && f.onGround && canCancel(f.move)) {
+    // special cancel (Rick 2026-11-21): a normal attack that hit or was blocked can go straight into a special,
+    // e.g. punch, punch, then down, forward + kick = Kade's Fiery Rush. Checked before strings, so the motion wins.
+    // Input buffering: the special can be typed in any time during the attack, even before it lands; it's kept
+    // in f.pendSpecial and fires the moment the attack connects (dropped if the attack misses).
+    for (const b of ['punch', 'kick']) {
+      if (!(f.buf[b] > 0)) continue;
+      const m = pickSpecial(f, b);
+      if (m) { f.buf[b] = 0; f.dirs = []; f.pendSpecial = {move: m, t: G.frame}; }
+    }
+    if (!f.moveHit) return;
+    const ps = f.pendSpecial;
+    // (a blocked finisher / special can't cancel its way out of being punished)
+    if (ps && G.frame - ps.t <= SPECIAL_BUFFER && !f.blockedExtra) return doSpecial(f, ps.move);
+    if (!f.chain) return;
+    // combo string: the last hit connected, so the next button in a string goes straight into its next move
+    for (const b of ['punch', 'kick']) {
+      if (!(f.buf[b] > 0)) continue;
+      const next = nextInString(f, b);
+      if (!next) continue;
+      f.buf[b] = 0;
+      return startMove(f, next, f.chain.concat(b));
+    }
   } else if (f.state === 'jump' && !f.airAttacked) {
     if (want(f, 'punch')) { f.airAttacked = true; startMove(f, 'airPunch'); }
     else if (want(f, 'kick')) { f.airAttacked = true; startMove(f, 'airKick'); }
   } else if ((f.state === 'dashf' || f.state === 'dashb') && f.t >= DASH_CANCEL) {
     // a dash can be cut short by an attack (dash in and punch)
-    if (want(f, 'punch')) return startMove(f, f.held.down ? 'uppercut' : 'punch');
-    if (want(f, 'kick')) return startMove(f, f.held.down ? 'sweep' : 'kick');
+    if (want(f, 'punch')) return f.held.down ? startMove(f, 'uppercut') : startMove(f, 'punch', ['punch']);
+    if (want(f, 'kick')) return f.held.down ? startMove(f, 'sweep') : startMove(f, 'kick', ['kick']);
   }
 }
 
+// ===== Charge attacks (Kade's Furnace Fist, Rick 2026-11-21) =====
+// back + punch with FIGHTERS[].backCharge puts the fighter in state 'charging' (can be hit, can't move) while punch
+// stays held. Let go before CHARGE_TAP frames = it was just a tap: a normal jab. Otherwise the charged move swings,
+// with f.charge 0..1 (how long it was held, up to CHARGE_MAX frames, where it swings by itself).
+const CHARGE_TAP = 6, CHARGE_MAX = 60;
+function updateCharge(f) {
+  f.vx = 0;
+  const t = f.t;
+  f.heat = clampF(t / CHARGE_MAX);      // fists glow hotter the longer it's held (drawn in draw.js)
+  if (f.def.throwFx && t % 4 === 0 && t > CHARGE_TAP) flames(f.x - f.face * 26, f.y - 96, -f.face);      // sparks off the fists
+  if (f.held.punch && t < CHARGE_MAX) return;
+  if (t < CHARGE_TAP) return startMove(f, 'punch', ['punch']);
+  const m = f.def.backCharge;
+  f.charge = clampF((t - CHARGE_TAP) / (CHARGE_MAX - CHARGE_TAP));      // (set before startMove, which logs it in practice)
+  startMove(f, m);
+  f.heat = Math.max(0.3, f.charge);
+  if (MOVES[m].heat) SFX.flame();
+}
+// ===== Throws (Rick 2026-11-21) =====
+// Punch + kick pressed together (up to THROW_TOGETHER frames apart) = throw. Holding away from the rival
+// tosses them backward (over your head, behind you); otherwise forward. If the grab catches them, the thrower goes
+// into state 'throwing' and the rival into 'held' (can't be hit, follows the thrower's hands) until THROW.release,
+// when they fly off and land in a knockdown. Fighters with def.throwFx (Kade) get glowing hands.
+const THROW_TOGETHER = 2;
+const THROW = {lift: 6, release: 28, end: 42};
+// Throw break (tech): the rival presses punch + kick (their throw input) any time from when the throw starts
+// until TECH_LATE frames into being held (= the throw's startup and first few active frames). Both get pushed apart.
+const TECH_LATE = 4;
+function startThrow(f) {
+  const away = f.face > 0 ? 'left' : 'right';
+  startMove(f, 'throw');
+  f.throwDir = f.held[away] ? -1 : 1;
+  f.throwStart = G.frame;
+  f.throwInputAt = G.frame;      // starting your own throw also counts as the throw input (for breaking theirs)
+}
+// Called from step() for every punch / kick press: was the other button pressed within THROW_TOGETHER frames?
+function noteThrowInput(f, b) {
+  if (!f.pressAt) f.pressAt = {};
+  f.pressAt[b] = G.frame;
+  const other = f.pressAt[b === 'punch' ? 'kick' : 'punch'];
+  if (other != null && G.frame - other <= THROW_TOGETHER) f.throwInputAt = G.frame;
+}
+const techInput = (att, def) => def.throwInputAt != null && def.throwInputAt >= att.throwStart - THROW_TOGETHER;
+function grab(att, def) {
+  if (techInput(att, def)) return techThrow(att, def);
+  setState(att, 'throwing'); att.vx = 0;
+  setState(def, 'held'); def.vx = 0; def.vy = 0; def.onGround = true;
+  def.throwDir = att.throwDir;
+  def.face = -att.face;
+  G.hitstop = 5;
+  SFX.grab();
+}
+function techThrow(att, def) {
+  for (const f of [att, def]) {
+    setState(f, 'blockstun'); f.stun = 18; f.blockLow = false;
+    f.y = GROUND; f.onGround = true; f.vy = 0;
+    f.vx = f === att ? -att.face * 6 : att.face * 6;      // pushed apart
+  }
+  def.note = 'THROW BREAK'; def.noteShow = 70;
+  G.hitstop = 6;
+  SFX.block();
+  spark((att.x + def.x) / 2, GROUND - 120, '#ffffff', 12);
+}
+// Where the thrower's hands are at frame t, in the thrower's own drawing space (facing right, feet at 0,0).
+// The hands hold the middle of the rival's body, so the arms (poseFor) and the rival (carry) both use this.
+// style 'slam' (Kade): grab high, hoist them overhead, then slam them down into the floor in front or behind.
+function throwGrip(style, dir, t) {
+  const c01 = k => Math.max(0, Math.min(1, k));
+  const lift = ease(c01(t / THROW.lift));
+  if (style === 'slam') {
+    const up = ease(c01((t - 4) / 12)), s = c01((t - 16) / (THROW.release - 16)), down = s * s;      // speeds up into the slam
+    if (dir > 0) {      // up overhead, then down in front, well out ahead (Rick 2026-11-21: a little more forward)
+      const x = 36 - 22 * up, y = -100 - 25 * lift - 50 * up;      // overhead, but still within arm's reach
+      return [x + (74 - x) * down, y + (-45 - y) * down];
+    }
+    // overhead, then over the top in an arc (centre 0,-100, radius 78) and down behind, further back than before
+    const a0 = 1.41, a = a0 + (4.05 - a0) * down, r = 78;
+    const ox = 36 - 25 * up, oy = -100 - 25 * lift - 51 * up;      // on the way up
+    const ax = r * Math.cos(a), ay = -100 - r * Math.sin(a);
+    return s > 0 ? [ax, ay] : [ox, oy];
+  }
+  if (dir > 0) {      // toss forward: hoist them up in front, then heave them forward
+    const up = ease(c01((t - 4) / 12)), push = ease(c01((t - 18) / 10));
+    return [40 + 34 * push, -100 - 10 * lift - 44 * up + 14 * push];
+  }
+  // toss backward: swing them round in a half circle over the head (within arm's reach) and down behind
+  const a = Math.PI * ease(c01((t - 4) / (THROW.release - 4)));
+  return [52 * Math.cos(a), -100 - 22 * lift - 52 * Math.sin(a)];
+}
+// Put the held rival so the middle of their body (their spin point, 8 px in front and 100 up) sits in the grip
+function carry(att, def, t) {
+  const [gx, gy] = throwGrip(att.def.throwStyle, att.throwDir, t);
+  def.x = att.x + att.face * (gx + 8);
+  def.y = GROUND + gy + 100;
+}
+function releaseThrow(att, def) {
+  const dir = att.face * att.throwDir;      // the way they go, on screen
+  const dmg = Math.round(MOVES.throw.dmg * att.def.power);
+  def.hp = lowerHp(def, dmg); def.flash = 6;
+  att.combo = 1;
+  practiceContact(att, 'throw', dmg);
+  if (att.def.throwStyle === 'slam') {      // straight into the floor: lying down at once, big shake and dust
+    setState(def, def.hp <= 0 ? 'ko' : 'down');
+    // the slam skids them on: forward 4; backward 16 (Rick 2026-11-21: reverse throw goes further, ~130 px behind)
+    def.onGround = true; def.y = GROUND; def.vy = 0; def.vx = dir * (att.throwDir > 0 ? 4 : 16);
+    if (att.throwDir < 0) dust(def.x - dir * 30, 10);      // a trail of dust as they skid away
+    G.hitstop = 10; G.shake = Math.max(G.shake, 16);
+    SFX.hit(true); SFX.thud();
+    dust(def.x, 18);
+    spark(def.x, GROUND - 20, att.def.throwFx || '#fff2b0', 16);
+    return;
+  }
+  setState(def, def.hp <= 0 ? 'ko' : 'knockdown');
+  // backward toss flies higher and further than before (was vy -6, vx 7), as far as a forward one or more
+  def.onGround = false; def.vy = -8; def.vx = dir * (att.throwDir > 0 ? 7 : 9);
+  G.hitstop = 8; G.shake = Math.max(G.shake, 10);
+  SFX.hit(true);
+  spark(def.x, def.y - 80, att.def.throwFx || '#fff2b0', 14);
+}
+function updateThrow(f) {
+  const def = G.fighters[1 - f.side];
+  f.vx = 0;
+  if (def.state === 'held' && f.t <= TECH_LATE && techInput(f, def)) return techThrow(f, def);
+  if (def.state === 'held') {
+    carry(f, def, f.t);
+    if (f.def.throwFx && f.t % 3 === 0 && f.t < THROW.release) flames(def.x - f.face * 6, def.y - 96, -f.face);      // embers off the glowing hands
+    if (f.t >= THROW.release) releaseThrow(f, def);
+  }
+  if (f.t >= THROW.end) setState(f, 'idle');
+}
+// Moves that can be cancelled into a special: every ground normal and string move, but not specials themselves or throws
+function canCancel(m) {
+  const M = MOVES[m];
+  return !M.air && !M.throw && !M.projectile && !FIGHTERS.some(d => (d.extras || []).some(x => x.move === m));
+}
+// Which move comes next if this fighter presses button b now? (null = b doesn't continue any of their strings)
+function nextInString(f, b) {
+  const n = f.chain.length;
+  for (const s of STRINGS[f.def.id] || []) {
+    if (s.btns.length > n && s.btns[n] === b && f.chain.every((x, i) => s.btns[i] === x)) return s.moves[n];
+  }
+  return null;
+}
+
+// Jump sideways speed (Rick 2026-11-21: jumps go higher and farther; a fighter's height comes from FIGHTERS[].jump)
+const JUMP_FWD = 5.6;
+const STRAIGHT_JUMP = 0.82;      // 0.82 x speed = about two-thirds of the height (~130 px instead of ~195)
 // Dash: DASH_FRAMES long; forward is faster than backward. While dashing you can still be hit.
 const DASH_TAP = 14, DASH_FRAMES = 14, DASH_CANCEL = 5, DASH_SPEED = 9.5, DASH_BACK = 7.5;
 function startDash(f, s) {
@@ -121,14 +378,35 @@ function updateFighter(f) {
   if (f.cd > 0) f.cd--;
   if (f.flash > 0) f.flash--;
   if (f.comboShow > 0) f.comboShow--;
+  if (f.noteShow > 0) f.noteShow--;      // short HUD note, e.g. THROW BREAK
   f.trail += (f.hp - f.trail) * (f.trail > f.hp + 0.2 ? 0.04 : 1);
 
   if (f.state === 'attack') {
     const M = MOVES[f.move];
     if (M.projectile && f.t === M.startup) spawnProjectile(f);
-    if (f.onGround) f.vx = 0;
-    if (f.t >= M.startup + M.active + M.recovery) setState(f, f.onGround ? 'idle' : 'jump');
+    if (M.spin && (f.t === 3 || f.t === M.startup)) dust(f.x + f.face * 30, 6);      // spinning sweep kicks up dust
+    if (f.onGround && M.rush) {
+      // rushing move: slide forward until it connects or ends, then skid to a stop. If it's blocked, keep sliding
+      // into their guard until right up against them (so they can punish it).
+      const foe = G.fighters[1 - f.side];
+      // (multi-hit moves keep travelling through their hits, carrying the rival along)
+      const going = f.t >= M.startup - 3 && f.t < M.startup + M.active &&
+        (!f.moveHit || M.hits || (f.blockedExtra && Math.abs(foe.x - f.x) > 58));
+      f.vx = going ? f.face * M.rush : f.vx * 0.75;
+      if (M.fire && going) {
+        // flames off the burning foot (for a spinning move, wherever the foot is in its turn)
+        const sx = M.spinN ? Math.cos(Math.PI * 2 * M.spinN * clampF((f.t - M.startup) / M.active)) : 1;
+        flames(f.x + f.face * 70 * sx, f.y - (M.fireY || 96), f.face);
+      }
+      if (M.spinN && f.t >= M.startup && (f.t - M.startup) % Math.round(M.active / M.spinN) === 0 && f.t < M.startup + M.active) SFX.whoosh();
+    } else if (f.onGround) f.vx = M.lunge && f.t < M.startup ? f.face * M.lunge : 0;
+    if (f.t >= M.startup + M.active + M.recovery + (f.blockedExtra || 0)) setState(f, f.onGround ? 'idle' : 'jump');
   }
+  if (f.state === 'blockstun' && f.held.block) f.blockLow = !!f.held.down;      // you can switch high/low guard while blocking
+  if (f.state === 'throwing') updateThrow(f);
+  if (f.state === 'charging') updateCharge(f);
+  // the thrower got knocked out of the throw (e.g. by a blast already flying): drop the held fighter
+  if (f.state === 'held' && G.fighters[1 - f.side].state !== 'throwing') { setState(f, 'knockdown'); f.onGround = false; f.vy = -3; }
   if ((f.state === 'hitstun' || f.state === 'blockstun') && f.t >= f.stun) setState(f, f.onGround ? 'idle' : 'jump');
   if (f.state === 'dashf' || f.state === 'dashb') {
     const top = f.state === 'dashf' ? DASH_SPEED : DASH_BACK;
@@ -150,20 +428,37 @@ function updateFighter(f) {
 }
 
 function land(f) {
-  if (f.state === 'knockdown') { setState(f, 'down'); f.vx *= 0.3; SFX.thud(); G.shake = Math.max(G.shake, 5); dust(f.x, 10); }
+  if (f.state === 'knockdown' || f.state === 'juggle') { setState(f, 'down'); f.vx *= 0.3; SFX.thud(); G.shake = Math.max(G.shake, 5); dust(f.x, 10); }
   else if (f.state === 'ko') { f.vx *= 0.3; SFX.thud(); G.shake = Math.max(G.shake, 7); dust(f.x, 14); }
   else if (f.state === 'attack' || f.state === 'jump' || f.state === 'hitstun' || f.state === 'blockstun') {
     setState(f, 'idle'); f.vx = 0; dust(f.x, 4);
   }
-  f.airAttacked = false;
+  // the air punch connected: for a moment after landing, the next press carries on a string (see control)
+  if (f.airPunchHit && f.state === 'idle') f.airStringUntil = G.frame + AIR_STRING;
+  f.airAttacked = false; f.airPunchHit = false;
 }
+// frames after landing in which the next punch / kick continues a string started by the air punch
+const AIR_STRING = 12;
 
-function hurtbox(f) {
-  if (FLOORED.has(f.state) || f.state === 'getup') return null;
-  const low = f.onGround && (f.state === 'crouch' || f.state === 'cblock' || (f.state === 'blockstun' && f.blockLow) ||
+// down low: crouching, crouch-blocking or sweeping (high attacks go over them)
+function isLow(f) {
+  return f.onGround && (f.state === 'crouch' || f.state === 'cblock' || (f.state === 'blockstun' && f.blockLow) ||
     (f.state === 'attack' && f.move === 'sweep'));
-  const h = low ? 96 : 150;
-  return {x: f.x - 24, y: f.y - h, w: 48, h};
+}
+// full = ignore crouching (mid and low ground attacks always reach a crouching fighter)
+function hurtbox(f, full) {
+  if (FLOORED.has(f.state) || f.state === 'getup' || f.state === 'held') return null;
+  const h = isLow(f) && !full ? 96 : 150;
+  const box = {x: f.x - 24, y: f.y - h, w: 48, h};
+  // pokes (M.poke): the stretched-out arm / leg can be hit from when it comes out until it's pulled back in
+  // (the first 2/3 of the recovery), so a rival who stays just out of reach can hit it (whiff punish)
+  const M = f.state === 'attack' && MOVES[f.move];
+  if (M && M.poke && f.t >= M.startup && f.t < M.startup + M.active + M.recovery * 2 / 3) {
+    const reach = M.hit.x + M.hit.w * 0.8 - 24;      // from the body's front edge to near the fist / foot
+    box.w += reach;
+    if (f.face < 0) box.x -= reach;
+  }
+  return box;
 }
 function hitRect(f) {
   const b = MOVES[f.move].hit;
@@ -173,17 +468,39 @@ function overlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y 
 function isBlocking(f) {
   return f.onGround && (f.state === 'block' || f.state === 'cblock' || (f.state === 'blockstun' && f.held.block));
 }
+function blockingLow(f) { return f.state === 'cblock' || (f.state === 'blockstun' && !!f.held.down); }
+// Does this block stop an attack of this level? Low attacks need a crouching block, overheads a standing block;
+// high and mid are fine either way (a high one never reaches a crouching fighter anyway).
+function blocks(def, M) {
+  const lv = levelOf(M);
+  return isBlocking(def) && (lv === 'low' ? blockingLow(def) : lv === 'overhead' ? !blockingLow(def) : true);
+}
 
 function checkHit(att, def) {
-  if (att.state !== 'attack' || att.moveHit) return;
-  const M = MOVES[att.move];
+  if (att.state !== 'attack') return;
+  let M = MOVES[att.move];
+  // multi-hit moves (M.hits, e.g. Blaze Wheel): can hit again every M.hitEvery frames, up to M.hits times
+  const again = M.hits && att.moveHit && att.hitN < M.hits && att.t - att.lastHitT >= M.hitEvery;
+  if (att.moveHit && !again) return;
   if (!M.hit || att.t < M.startup || att.t >= M.startup + M.active) return;
-  const hb = hurtbox(def);
+  // ground attacks: the level decides. High ones miss a crouching fighter; mid and low ones always reach them.
+  const ground = !M.air && !M.throw;
+  if (!M.air && levelOf(M) === 'high' && isLow(def)) return;      // includes throws: crouching ducks them
+  // (an overhead from the air also reaches a crouching fighter's head, so it hits through a crouching block)
+  const hb = hurtbox(def, ground || levelOf(M) === 'overhead');
   if (!hb) return;
   if (M.throw && !canThrow(def)) return;
   const r = hitRect(att);
   if (!overlap(r, hb)) return;
   att.moveHit = true;
+  if (att.move === 'airPunch') att.airPunchHit = true;      // lets a string carry on after landing
+  if (M.hits) {      // only the last hit knocks down; the ones before keep them in a short stun, right in front
+    att.hitN = (att.hitN || 0) + 1; att.lastHitT = att.t;
+    if (att.hitN < M.hits) M = Object.assign({}, M, {knockdown: false, hitstun: M.hitEvery + 12, push: 1, from: att.move});
+    else M = Object.assign({}, M, {from: att.move});
+  }
+  // charged moves: more damage and knockback the longer it was charged
+  if (M.dmgCharge) M = Object.assign({}, M, {dmg: M.dmg + M.dmgCharge * (att.charge || 0), kb: M.kb + M.kbCharge * (att.charge || 0), from: att.move});
   const sx = att.face > 0 ? Math.max(r.x, hb.x) : Math.min(r.x + r.w, hb.x + hb.w);
   const sy = Math.max(r.y, hb.y) + Math.min(r.h, 20) / 2;
   applyHit(att, def, M, att.face, sx, sy);
@@ -191,28 +508,47 @@ function checkHit(att, def) {
 
 function applyHit(att, def, M, dir, sx, sy) {
   const pw = att.def.power;
-  if (!M.throw && isBlocking(def)) {
-    def.hp = Math.max(0, def.hp - Math.max(1, Math.round(M.dmg * pw * 0.15)));
-    def.blockLow = def.state === 'cblock' || (def.state === 'blockstun' && def.blockLow);
+  if (M.throw) return grab(att, def);      // the damage comes when they're tossed (releaseThrow)
+  if (blocks(def, M)) {
+    const punishable = att.state === 'attack' && (MOVES[att.move] === M || M.from === att.move) && BLOCK_PUNISH[att.move];
+    const chip = Math.max(1, Math.round(M.dmg * pw * 0.15));
+    def.hp = lowerHp(def, chip);
+    practiceContact(att, 'block', chip);
+    def.blockLow = blockingLow(def);
     setState(def, 'blockstun');
     def.stun = M.blockstun || 12;
-    def.vx = dir * 4;
+    // less push on a punishable block, so the attacker stays in reach; a lot on a heavy one (M.blockPush)
+    def.vx = dir * (M.blockPush || (punishable ? 1.5 : 4));
+    if (M.blockPush) { G.shake = Math.max(G.shake, 6); dust(def.x, 6); }
     G.hitstop = 4;
     SFX.block();
     spark(sx, sy, '#8fd8ff', 6);
+    // blocked finisher / special: the attacker is stuck in a longer recovery (punishable)
+    if (punishable) att.blockedExtra = punishable;
     if (def.hp <= 0) { setState(def, 'ko'); def.onGround = false; def.vy = -9; def.vx = dir * 5; }
     return;
   }
-  const d = Math.round(M.dmg * pw);
-  const comboing = def.state === 'hitstun' || def.state === 'knockdown';
+  // hit back while they're stuck recovering from a blocked finisher / special
+  if (def.state === 'attack' && def.blockedExtra) { att.note = 'PUNISH!'; att.noteShow = 70; }
+  const juggled = def.state === 'juggle';
+  // each extra hit in a juggle does a bit less damage (down to half)
+  const d = Math.round(M.dmg * pw * (juggled ? Math.max(0.5, 1 - 0.12 * def.juggleN) : 1));
+  const comboing = def.state === 'hitstun' || def.state === 'knockdown' || juggled;
   att.combo = comboing ? att.combo + 1 : 1;
   if (att.combo >= 2) att.comboShow = 80;
-  def.hp = Math.max(0, def.hp - d);
+  def.hp = lowerHp(def, d);
+  practiceContact(att, 'hit', d);
   def.flash = 6;
   if (def.hp <= 0) {
     setState(def, 'ko'); def.onGround = false; def.vy = -9; def.vx = dir * 5;
-  } else if (M.throw) {
-    setState(def, 'knockdown'); def.onGround = false; def.vy = -11; def.vx = -dir * 5.5;
+  } else if ((M.juggle && def.onGround) || (juggled && def.juggleN < JUGGLE_MAX)) {
+    // launcher: knock them up into the air, where they can still be hit (a juggle). Every hit pops them up again,
+    // a bit less each time, and after JUGGLE_MAX extra hits the next one just knocks them down.
+    def.juggleN = juggled ? def.juggleN + 1 : 0;
+    const k = Math.max(0.45, 1 - 0.13 * def.juggleN);
+    setState(def, 'juggle'); def.onGround = false;
+    def.vy = juggled ? Math.min(-5, (M.launch || -11) * k) : M.launch;
+    def.vx = dir * (juggled ? 0.8 : M.kb);
   } else if (M.knockdown || !def.onGround) {
     setState(def, 'knockdown'); def.onGround = false; def.vy = M.launch || -7; def.vx = dir * (M.kb || 4);
   } else {
@@ -247,9 +583,9 @@ function updateProjectiles() {
     if (!live) continue;
     const foe = G.fighters[0] === p.owner ? G.fighters[1] : G.fighters[0];
     const hb = hurtbox(foe);
-    if (hb && circleRect(p, hb)) {
+    if (hb && !isLow(foe) && circleRect(p, hb)) {      // blasts are high: crouching ducks them
       p.dead = true;
-      applyHit(p.owner, foe, {dmg: p.s.dmg / p.owner.def.power, hitstun: 22, push: 6, blockstun: 14, heavy: true},
+      applyHit(p.owner, foe, {dmg: p.s.dmg / p.owner.def.power, hitstun: 22, push: 6, blockstun: 14, heavy: true, level: 'high'},
         Math.sign(p.vx), p.x, p.y);
     }
   }
@@ -264,7 +600,8 @@ function updateProjectiles() {
 
 // ===== Keep fighters apart =====
 function separate(a, b) {
-  if (FLOORED.has(a.state) || FLOORED.has(b.state)) return;
+  if (FLOORED.has(a.state) || FLOORED.has(b.state) || a.state === 'juggle' || b.state === 'juggle' ||
+      a.state === 'held' || b.state === 'held') return;
   if (Math.abs(a.y - b.y) > 110) return;
   const min = 46, dx = b.x - a.x;
   if (Math.abs(dx) >= min) return;

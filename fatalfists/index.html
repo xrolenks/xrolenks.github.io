@@ -12,19 +12,24 @@
   <div id="stage">
     <canvas id="cv"></canvas>
     <button id="pauseBtn" aria-label="Pause">❚❚</button>
+    <!-- practice mode: dummy settings (js/practice.js) -->
+    <div id="dummyPanel">
+      <b>Dummy</b>
+      <div class="drow"><span>Stance</span><button data-stance="stand">Standing</button><button data-stance="crouch">Crouching</button></div>
+      <div class="drow"><span>Blocking</span><button data-block="0">Off</button><button data-block="1">On</button></div>
+    </div>
   </div>
   <div id="touch">
     <div class="pad dpad">
-      <button data-k="KeyW" class="u" aria-label="Jump">▲</button>
-      <button data-k="KeyA" class="l" aria-label="Left">◀</button>
-      <button data-k="KeyD" class="r" aria-label="Right">▶</button>
-      <button data-k="KeyS" class="d" aria-label="Crouch">▼</button>
+      <button data-k="KeyW" data-a="up" class="u" aria-label="Jump">▲</button>
+      <button data-k="KeyA" data-a="left" class="l" aria-label="Left">◀</button>
+      <button data-k="KeyD" data-a="right" class="r" aria-label="Right">▶</button>
+      <button data-k="KeyS" data-a="down" class="d" aria-label="Crouch">▼</button>
     </div>
     <div class="pad acts">
-      <button data-k="KeyJ">Punch</button>
-      <button data-k="KeyK">Kick</button>
-      <button data-k="KeyL">Block</button>
-      <button data-k="KeyI">Special</button>
+      <button data-k="KeyJ" data-a="punch">Punch</button>
+      <button data-k="KeyK" data-a="kick">Kick</button>
+      <button data-k="KeyL" data-a="block">Block</button>
     </div>
   </div>
 </div>
@@ -33,9 +38,12 @@
   <h1 class="logo">FATAL FISTS</h1>
   <p class="tag">One-on-one arcade fighting</p>
   <button class="btn" data-go="1p">1 Player</button>
-  <button class="btn" data-go="2p">2 Players</button>
+  <!-- 2 Players hidden for now (Rick 2026-11-21); the mode still works: <button class="btn" data-go="2p">2 Players</button> -->
+  <button class="btn" data-go="practice">Practice</button>
   <button class="btn" data-go="online">Play online</button>
   <button class="btn" data-go="help">How to play</button>
+  <button class="btn" data-go="moves">Move list</button>
+  <button class="btn" data-go="controls">Controls</button>
   <button class="btn small" id="muteBtn">Sound: on</button>
   <a class="back" href="/games/">&larr; Back to the games</a>
 </div></section>
@@ -71,36 +79,38 @@
 </div></section>
 
 <section class="screen" id="s-help"><div class="box">
+  <!-- short tutorial (Rick 2026-11-21). <kbd data-key="0.x"> boxes show the player's own keys (showKeyLabels) -->
   <h2>How to play</h2>
-  <p class="hint">Knock your rival's health bar to zero. Win two rounds to win the fight. Each round lasts 60 seconds; if time runs out, whoever has more health wins it.</p>
-  <div class="help">
+  <p class="hint">Knock your rival's health to zero. Win two rounds to win the fight. Try each step on the dummy in <b>Practice</b>.</p>
+  <div class="help tut">
     <div>
-      <h3>Player 1</h3>
-      <p><kbd>A</kbd> <kbd>D</kbd> walk &nbsp; <kbd>W</kbd> jump &nbsp; <kbd>S</kbd> crouch</p>
-      <p><kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp; <kbd>L</kbd> block &nbsp; <kbd>I</kbd> special</p>
-      <p class="hint">Sharing a laptop? <kbd>F</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>T</kbd> work too. In 1 player, the arrow keys also move.</p>
+      <h3>1. Move and guard</h3>
+      <p><kbd data-key="0.left">A</kbd> <kbd data-key="0.right">D</kbd> walk, <kbd data-key="0.up">W</kbd> jump, <kbd data-key="0.down">S</kbd> crouch. Tap a direction twice to dash.</p>
+      <p>Hold <kbd data-key="0.block">L</kbd> to block. Standing blocks high attacks and overheads; crouching blocks lows.</p>
     </div>
     <div>
-      <h3>Player 2</h3>
-      <p>Arrow keys to walk, jump and crouch</p>
-      <p>Number pad <kbd>1</kbd> punch, <kbd>2</kbd> kick, <kbd>3</kbd> block, <kbd>5</kbd> special</p>
-      <p class="hint">No number pad? Use <kbd>,</kbd> <kbd>.</kbd> <kbd>/</kbd> <kbd>'</kbd> instead.</p>
+      <h3>2. Punch and kick</h3>
+      <p><kbd data-key="0.punch">J</kbd> punch, <kbd data-key="0.kick">K</kbd> kick. Add <kbd data-key="0.down">S</kbd> for an uppercut or a leg sweep.</p>
+      <p>Jump in with <kbd data-key="0.punch">J</kbd>: an overhead that hits even if they crouch.</p>
     </div>
     <div>
-      <h3>Moves</h3>
-      <p><b>Crouch + punch</b>: uppercut, knocks them down</p>
-      <p><b>Crouch + kick</b>: leg sweep, knocks them down</p>
-      <p><b>Toward + punch</b> up close: throw (can't be blocked)</p>
-      <p><b>Jump + punch or kick</b>: attack from the air</p>
-      <p><b>Double-tap left or right</b>: quick dash (punch or kick during it to dash in and hit)</p>
-      <p><b>Special</b>: your fighter's energy blast, then a short wait to recharge</p>
+      <h3>3. Strings</h3>
+      <p>Press buttons one after another while your hits land, e.g. Kade's <kbd data-key="0.punch">J</kbd> <kbd data-key="0.punch">J</kbd> <kbd data-key="0.punch">J</kbd>. A miss stops the string.</p>
+      <p>A blocked last hit leaves you open, so don't throw it out carelessly.</p>
     </div>
     <div>
-      <h3>Staying alive</h3>
-      <p>Hold <b>block</b> to guard. Blocked hits only scratch you.</p>
-      <p><b>Crouch</b> to duck under punches and blasts.</p>
-      <p>Quick hits in a row make a combo.</p>
-      <p><kbd>Esc</kbd> or <kbd>P</kbd> pauses.</p>
+      <h3>4. Throws</h3>
+      <p>Up close, press <kbd data-key="0.punch">J</kbd> + <kbd data-key="0.kick">K</kbd> together. It goes through blocks. Hold back to throw them behind you.</p>
+      <p>Being grabbed? Press <kbd data-key="0.punch">J</kbd> + <kbd data-key="0.kick">K</kbd> fast to break free, or crouch to duck it.</p>
+    </div>
+    <div>
+      <h3>5. Special moves</h3>
+      <p><b>↓ → +</b> <kbd data-key="0.punch">J</kbd> throws your energy blast. Some fighters have more specials.</p>
+      <p>Do the motion right after a punch lands to cancel straight into it, e.g. <kbd data-key="0.punch">J</kbd> <kbd data-key="0.punch">J</kbd> then <b>↓ →</b> + <kbd data-key="0.kick">K</kbd> for Kade's Fiery Rush.</p>
+    </div>
+    <div>
+      <h3>6. Learn more</h3>
+      <p>Every fighter's moves, strings and specials are in the <b>Move list</b>. Esc or P pauses; change keys in <b>Controls</b>.</p>
     </div>
   </div>
   <button class="btn small" data-go="title">Back</button>
@@ -109,8 +119,26 @@
 <section class="screen light" id="s-pause"><div class="box">
   <h2>Paused</h2>
   <button class="btn" data-go="resume">Resume</button>
-  <button class="btn" data-go="restart">Restart fight</button>
+  <button class="btn" data-go="restart">Restart fight</button>  <button class="btn" data-go="moves">Move list</button>
+  <button class="btn" data-go="controls">Controls</button>
   <button class="btn" data-go="title">Quit to menu</button>
+</div></section>
+
+<section class="screen" id="s-controls"><div class="box">
+  <h2>Controls</h2>
+  <p class="hint" id="bindHint">Click a key box, then press the key you want to use.</p>
+  <div class="help" id="bindList"></div>
+  <button class="btn small" id="resetKeys">Reset to normal keys</button>
+  <button class="btn small" data-go="controls-back">Back</button>
+</div></section>
+
+<section class="screen" id="s-moves"><div class="box">
+  <h2>Move list</h2>
+  <div class="mtabs" id="mtabs"></div>
+  <div class="mtabs small" id="mplayer"></div>
+  <div class="help" id="movelist"></div>
+  <p class="hint" id="movesKeyHint"></p>
+  <button class="btn small" data-go="moves-back">Back</button>
 </div></section>
 
 <section class="screen light" id="s-end"><div class="box">
@@ -130,6 +158,7 @@
 <script src="js/update.js"></script>
 <script src="js/draw.js"></script>
 <script src="js/online.js"></script>
+<script src="js/practice.js"></script>
 <script src="js/menus.js"></script>
 <script src="js/main.js"></script>
 </body>

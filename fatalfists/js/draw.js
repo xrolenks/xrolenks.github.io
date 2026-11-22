@@ -127,7 +127,10 @@ function drawHead(c, d, h, white) {
 }
 function drawFighter(c, d, pose, x, y, face, sc, white) {
   c.save();
-  c.translate(x, y); c.scale(face * sc, sc);
+  // sx < 1 = turning (spins). Never squash below 0.2 wide, or the fighter vanishes for a frame when exactly side-on.
+  const sxRaw = pose.sx == null ? 1 : pose.sx, sxDraw = (sxRaw < 0 ? -1 : 1) * Math.max(0.2, Math.abs(sxRaw));
+  c.translate(x, y); c.scale(face * sc * sxDraw, sc);
+  if (pose.rot) { c.translate(8, -100); c.rotate(pose.rot); c.translate(-8, 100); }      // jump flip, around the tucked body's middle
   c.lineCap = 'round'; c.lineJoin = 'round';
   const W_ = '#ffffff';
   const col = k => white ? W_ : d[k];
@@ -152,11 +155,95 @@ function drawFighter(c, d, pose, x, y, face, sc, white) {
   // belt
   const bx = n[0] - hp[0], by = n[1] - hp[1], bl = Math.hypot(bx, by) || 1;
   seg(c, [hp, [hp[0] + bx / bl * 6, hp[1] + by / bl * 6]], 27, col('band'), false);
+  if (pose.fire > 0) drawLegFire(c, kF, fF, pose.fire, false);      // flames behind the leg, so the leg still shows
   leg(hiF, kF, fF, false);
+  if (pose.fire > 0) drawLegFire(c, kF, fF, pose.fire, true);       // small hot licks on top, round the foot
   seg(c, [n, pose.head], 9, col('skin'));
   drawHead(c, d, pose.head, white);
   arm(shF, eF, hF, false);
+  if (pose.glow > 0 && d.throwFx) { drawHandGlow(c, hF, d.throwFx, pose.glow); drawHandGlow(c, hB, d.throwFx, pose.glow); }
+  if (pose.heat > 0) { drawFistHeat(c, hF, pose.heat); drawFistHeat(c, hB, pose.heat); }
   c.restore();
+}
+// Heating fists (charge moves): k 0..1. Dark red embers at first, then orange, then a white-hot core and a big glow.
+function drawFistHeat(c, h, k) {
+  const mix = (a, b, s) => a.map((v, i) => Math.round(v + (b[i] - v) * s));
+  const col = k < 0.5 ? mix([150, 20, 10], [255, 120, 20], k * 2) : mix([255, 120, 20], [255, 240, 190], (k - 0.5) * 2);
+  const r = (10 + 22 * k) * (1 + Math.sin(G.frame * 0.9 + h[0]) * 0.08);
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  const g = c.createRadialGradient(h[0], h[1], 1, h[0], h[1], r);
+  g.addColorStop(0, 'rgba(' + mix(col, [255, 255, 255], k * 0.6) + ',' + (0.5 + 0.5 * k) + ')');
+  g.addColorStop(0.4, 'rgba(' + col + ',' + (0.35 + 0.45 * k) + ')');
+  g.addColorStop(1, 'rgba(' + col + ',0)');
+  c.fillStyle = g; c.beginPath(); c.arc(h[0], h[1], r, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+// glowing hand (Kade's throw): a soft flickering light round the glove, in the fighter's throwFx colour
+function drawHandGlow(c, h, col, amt) {
+  const r = (20 + Math.sin(G.frame * 0.8 + h[0]) * 3) * amt;
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  const g = c.createRadialGradient(h[0], h[1], 1, h[0], h[1], r);
+  g.addColorStop(0, 'rgba(255,245,200,' + 0.9 * amt + ')');
+  g.addColorStop(0.35, col);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.globalAlpha = 0.85;
+  c.fillStyle = g; c.beginPath(); c.arc(h[0], h[1], r, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+// Flames wrapped round the shin and foot (knee kn -> foot ft, in the fighter's own drawing space, so "back" is -x).
+// amt 0..1 = how strong. Flickers with G.frame; tongues lick backwards and up, like the leg is moving through the air.
+function drawLegFire(c, kn, ft, amt, front) {
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  if (front) {      // a few small bright tongues round the foot, drawn over the leg
+    for (let i = 0; i < 3; i++) {
+      const fl = Math.sin(G.frame * 1.1 + i * 2.1), r = (4 + fl * 1.5) * amt;
+      c.fillStyle = i ? 'rgba(255,170,40,0.55)' : 'rgba(255,240,150,0.7)';
+      c.beginPath(); c.ellipse(ft[0] - 4 - i * 7, ft[1] - 6 - i * 2, r * 1.8, r, -0.4, 0, Math.PI * 2); c.fill();
+    }
+    c.restore();
+    return;
+  }
+  const n = 6;
+  for (let i = 0; i < n; i++) {
+    const k = i / (n - 1), x = kn[0] + (ft[0] - kn[0]) * k, y = kn[1] + (ft[1] - kn[1]) * k;
+    const fl = Math.sin(G.frame * 0.9 + i * 1.7), r = (6 + 6 * k + fl * 2) * amt;
+    const len = r * (2 + 0.6 * Math.sin(G.frame * 0.6 + i));
+    c.fillStyle = 'rgba(255,80,20,0.45)';      // outer tongue, trailing back and up
+    c.beginPath(); c.ellipse(x - len * 0.7, y - r * 0.9, len, r * 0.85, -0.35, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,180,50,0.55)';
+    c.beginPath(); c.ellipse(x - len * 0.3, y - r * 0.5, len * 0.55, r * 0.6, -0.3, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+}
+const clamp01 = k => Math.max(0, Math.min(1, k));
+// Jump: stretch on take-off, curl into a tuck near the top, open up again before landing.
+// Jumping toward or away from the rival also does one full flip while curled.
+function jumpPose(f) {
+  // 0 = take-off, 1 = landing (a straight-up jump starts slower, so scale by its own take-off speed)
+  const j = -(f.jumpV || -f.def.jump), ph = clamp01(((f.vy || 0) + j) / (2 * j));
+  // knees tuck in early (Rick 2026-11-21: sooner), fully curled by a quarter of the way up, open again before landing
+  const w = ph < 0.4 ? ease(clamp01((ph - 0.03) / 0.2)) : 1 - ease(clamp01((ph - 0.76) / 0.16));
+  const p = lerpPose(P.jump, P.tuck, w);
+  if (f.flip) p.rot = f.flip * Math.PI * 2 * ease(clamp01((ph - 0.14) / 0.64));
+  return p;
+}
+// Spinning sweep: drop low with the leg out, turn all the way round once (squash the drawing sideways,
+// so the leg swings behind and back to the front), and hit when it comes back round. Then get up slowly.
+// The turn is fast while side-on and slows right down while the back faces the rival (Rick 2026-11-21: stay
+// turned around longer, smoother): turn = a + c/(2π)·sin(2πa) has speed 1 + c·cos(2πa), so 1.75x at the start
+// and end, 0.25x halfway round, with no sudden stops.
+function spinPose(f, M, base) {
+  const t = f.t, k = ease(clamp01(t / 4));
+  if (t < M.startup + M.active) {
+    const p = lerpPose(base, P.sweep, k);
+    const a = clamp01(t / M.startup), turn = a + 0.75 / (2 * Math.PI) * Math.sin(2 * Math.PI * a);
+    p.sx = Math.cos(Math.PI * 2 * turn);
+    return p;
+  }
+  return lerpPose(base, P.sweep, ease(clamp01(1 - (t - M.startup - M.active) / M.recovery)));
 }
 function poseFor(f) {
   const t = f.t;
@@ -180,21 +267,73 @@ function poseFor(f) {
     case 'cblock': return P.cblock;
     case 'blockstun': return f.blockLow ? P.cblock : P.block;
     case 'hitstun': return P.hit;
-    case 'jump': return P.jump;
+    case 'jump': return jumpPose(f);
     case 'dashf': case 'dashb': return lerpPose(P.idle, P[f.state], ease(Math.min(1, t / 3)));
-    case 'knockdown': return P.fall;
+    case 'knockdown': case 'juggle': return P.fall;
     case 'down': return P.lie;
     case 'getup': return lerpPose(P.lie, P.crouch, ease(Math.min(1, t / 20)));
     case 'ko': return f.onGround ? P.lie : P.fall;
     case 'win': return lerpPose(P.idle, P.win, ease(Math.min(1, t / 12)));
+    case 'charging': {      // winding up a charge move: pull back, then tremble harder the hotter it gets
+      const p = lerpPose(P.idle, P.furnaceWind, ease(clamp01(t / 6)));
+      const shake = f.heat > 0.4 ? (f.heat - 0.4) * 3 : 0;
+      if (shake) for (const k of ['neck', 'head', 'hF', 'hB']) { p[k][0] += Math.sin(G.frame * 2.1) * shake; p[k][1] += Math.cos(G.frame * 2.7) * shake * 0.6; }
+      p.heat = f.heat || 0;
+      return p;
+    }
+    case 'throwing': {      // grab -> lift -> heave forward (or swing over the head backward) -> back to standing
+      const fwd = f.throwDir > 0, slam = f.def.throwStyle === 'slam', R = THROW.release;
+      const top = slam ? 16 : fwd ? 18 : 16;
+      const toss = slam ? (fwd ? P.slam : P.slamBack) : fwd ? P.throwToss : P.throwBack;
+      let p;
+      if (t < THROW.lift) p = clonePose(P.throw);
+      else if (t < top) p = lerpPose(P.throw, P.throwLift, ease((t - THROW.lift) / (top - THROW.lift)));
+      else if (t < R) { const s = (t - top) / (R - top); p = lerpPose(P.throwLift, toss, slam ? s * s : ease(s)); }      // a slam speeds up
+      else p = lerpPose(toss, P.idle, ease(clamp01((t - R - (slam ? 4 : 0)) / (THROW.end - R - (slam ? 4 : 0)))));      // a slam holds a moment
+      if (t < R) {      // hands stay on the rival the whole time they're held
+        const [gx, gy] = throwGrip(f.def.throwStyle, f.throwDir, t);
+        p.hF = [gx, gy]; p.hB = [gx - 6, gy + 8];
+      }
+      if (f.def.throwFx) p.glow = t < R ? 1 : clamp01(1 - (t - R) / 8);
+      return p;
+    }
+    case 'held': {          // being thrown: limp, then flipped over (backward toss) or bent back (forward toss)
+      const p = lerpPose(P.hit, P.fall, ease(clamp01(t / 10)));
+      if (G.fighters[1 - f.side].def.throwStyle === 'slam') {
+        // slam: upright while hoisted, then turned to land flat on their back (in front: tipped back a quarter turn;
+        // behind: carried over the top, three quarters round), so they match the lying pose when they hit the floor
+        const s = clamp01((t - 16) / (THROW.release - 16));
+        p.rot = (f.throwDir > 0 ? -Math.PI / 2 : Math.PI * 1.5) * s * s;
+      } else {
+        p.rot = f.throwDir > 0 ? -0.6 * ease(clamp01((t - 18) / 10)) : Math.PI * 2 * ease(clamp01((t - 4) / (THROW.release - 4)));
+      }
+      return p;
+    }
     case 'attack': {
       const M = MOVES[f.move];
-      const base = M.air ? P.jump : (f.move === 'sweep' || f.move === 'uppercut') ? P.crouch : P.idle;
-      let k;
-      if (t < M.startup) k = t / M.startup;
-      else if (t < M.startup + M.active) k = 1;
-      else k = 1 - (t - M.startup - M.active) / M.recovery;
-      return lerpPose(base, P[f.move], ease(Math.max(0, Math.min(1, k))));
+      const base = M.basePose ? P[M.basePose] : M.air ? P.jump : (f.move === 'sweep' || f.move === 'uppercut') ? P.crouch : P.idle;
+      if (M.spin) return spinPose(f, M, base);
+      let k, p;
+      if (M.wind && t < M.startup) {      // two-part swing: wind up for the first half, then strike
+        const half = M.startup / 2;
+        p = t < half ? lerpPose(base, P[M.wind], ease(t / half)) : lerpPose(P[M.wind], P[f.move], ease((t - half) / half));
+      } else {
+        if (t < M.startup) k = t / M.startup;
+        else if (t < M.startup + M.active) k = 1;
+        else k = 1 - (t - M.startup - M.active) / (M.recovery + (f.blockedExtra || 0));      // blocked: slower recovery
+        p = lerpPose(base, P[f.move], ease(Math.max(0, Math.min(1, k))));
+      }
+      // spinning move (Blaze Wheel): turns all the way round spinN times while active (squashing the drawing sideways)
+      if (M.spinN && t >= M.startup && t < M.startup + M.active) p.sx = Math.cos(Math.PI * 2 * M.spinN * (t - M.startup) / M.active);
+      if (M.throw && f.def.throwFx) p.glow = clamp01(t / 3);
+      // charged punch: fists stay as hot as the charge through the swing, then cool off during the recovery
+      if (M.heat) { const end = M.startup + M.active; p.heat = (f.heat || 0) * (t < end ? 1 : clamp01(1 - (t - end) / 14)); }      // hands light up as they reach for the grab
+      // burning leg: flares up just before the rush, dies down in the first frames of recovery
+      if (M.fire) {
+        const end = M.startup + M.active;
+        p.fire = t < end ? clamp01((t - M.startup + 5) / 5) : clamp01(1 - (t - end) / 10);
+      }
+      return p;
     }
   }
   return P.idle;
@@ -322,22 +461,22 @@ function drawHUD() {
     c.font = 'italic 800 20px system-ui, sans-serif';
     c.textAlign = right ? 'right' : 'left'; c.textBaseline = 'top';
     const label = G.mode === 'online' ? (f.side === NET.side ? 'YOU' : 'RIVAL') :
-      f.side === 0 ? (G.mode === '2p' ? 'P1' : 'YOU') : (G.mode === '2p' ? 'P2' : 'CPU');
+      f.side === 0 ? (G.mode === '2p' ? 'P1' : 'YOU') : (G.mode === '2p' ? 'P2' : isPractice() ? 'DUMMY' : 'CPU');
     const nx = right ? x + w : x;
     c.lineWidth = 4; c.strokeStyle = '#000';
     c.strokeText(f.def.name.toUpperCase(), nx, y + 42); c.fillStyle = '#fff'; c.fillText(f.def.name.toUpperCase(), nx, y + 42);
     const nw = c.measureText(f.def.name.toUpperCase() + ' ').width;
     c.font = '700 12px system-ui, sans-serif'; c.fillStyle = f.def.shirt;
     c.fillText(label, right ? nx - nw : nx + nw, y + 49);
-    // round wins
-    for (let i = 0; i < 2; i++) {
+    // round wins (none in practice)
+    for (let i = 0; i < (isPractice() ? 0 : 2); i++) {
       const px = right ? x + 14 + i * 22 : x + w - 14 - i * 22;
       c.beginPath(); c.arc(px, y + 54, 7, 0, Math.PI * 2);
       c.fillStyle = G.wins[f.side] > i ? '#ffcf5a' : '#2a0d0c'; c.fill();
       c.lineWidth = 2; c.strokeStyle = '#000'; c.stroke();
     }
-    // combo
-    if (f.comboShow > 0) {
+    // combo (practice mode has its own hits / damage box instead)
+    if (f.comboShow > 0 && !isPractice()) {
       c.globalAlpha = Math.min(1, f.comboShow / 20);
       c.font = 'italic 900 34px system-ui, sans-serif';
       c.textAlign = right ? 'right' : 'left';
@@ -348,6 +487,15 @@ function drawHUD() {
       c.fillText('COMBO', cx, 156);
       c.globalAlpha = 1;
     }
+    if (f.noteShow > 0) {      // e.g. THROW BREAK
+      c.globalAlpha = Math.min(1, f.noteShow / 20);
+      c.font = 'italic 900 26px system-ui, sans-serif';
+      c.textAlign = right ? 'right' : 'left';
+      const cx = right ? W - 40 : 40;
+      c.lineWidth = 6; c.strokeStyle = '#000'; c.strokeText(f.note, cx, 196);
+      c.fillStyle = '#9fe3ff'; c.fillText(f.note, cx, 196);
+      c.globalAlpha = 1;
+    }
   };
   bar(40, a, false);
   bar(540, b, true);
@@ -355,7 +503,8 @@ function drawHUD() {
   c.fillStyle = '#2a0d0c'; c.fillRect(451, 17, 58, 40);
   c.font = '900 30px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillStyle = G.timer <= 10 ? '#ff5a4d' : '#fff';
-  c.fillText(String(G.timer).padStart(2, '0'), 480, 38);
+  c.fillText(isPractice() ? '∞' : String(G.timer).padStart(2, '0'), 480, 38);
+  if (isPractice()) drawPracticeHUD(c);
 }
 function drawMsg() {
   if (!G.msg) return;

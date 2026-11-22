@@ -1,14 +1,18 @@
 'use strict';
 // Fatal Fists - menu screens, fighter select, buttons, keys, touch
 // ===== Screens =====
-const SCREENS = ['title', 'level', 'select', 'help', 'online', 'pause', 'end'];
+const SCREENS = ['title', 'level', 'select', 'help', 'moves', 'controls', 'online', 'pause', 'end'];
 function show(name) {
   G.screen = name === 'pause' ? 'game' : name;
   G.paused = name === 'pause';
   for (const s of SCREENS) $('s-' + s).classList.toggle('on', s === name);
+  document.body.classList.toggle('practice', isPractice());      // shows the on-screen dummy buttons (practice.js)
   document.body.classList.toggle('playing', name === 'game');
   for (const k in keys) keys[k] = false;
   if (name === 'select') buildSelect();
+  if (name === 'moves') buildMoves();
+  if (name === 'controls') buildControls();
+  if (name === 'help') showKeyLabels();
   const first = name !== 'game' && $('s-' + name).querySelector('button');
   if (first && !document.body.classList.contains('touch')) first.focus();
 }
@@ -51,16 +55,17 @@ function markSelect() {
   [...roster.children].forEach((b, i) => {
     b.classList.toggle('cur', i === G.cursor);
     const old = b.querySelector('.badge'); if (old) old.remove();
-    if (G.mode === '2p' && G.picker === 1 && i === G.picks[0]) {
-      const s = document.createElement('span'); s.className = 'badge'; s.textContent = 'P1'; b.appendChild(s);
+    if ((G.mode === '2p' || G.mode === 'practice') && G.picker === 1 && i === G.picks[0]) {
+      const s = document.createElement('span'); s.className = 'badge'; s.textContent = G.mode === 'practice' ? 'YOU' : 'P1'; b.appendChild(s);
     }
   });
   if (G.mode === 'online') {
     const mine = NET.picked[NET.side], theirs = NET.picked[1 - NET.side];
     $('pickWho').textContent = mine ? 'Waiting for your friend to pick…' : theirs ? 'Your friend has picked. Your turn!' : 'Pick your fighter';
-  } else $('pickWho').textContent = G.mode === '1p' ? 'Pick your fighter' : (G.picker === 0 ? 'Player 1, pick a fighter' : 'Player 2, pick a fighter');
+  } else if (G.mode === 'practice') $('pickWho').textContent = G.picker === 0 ? 'Practice: pick your fighter' : 'Pick the test dummy';
+  else $('pickWho').textContent = G.mode === '1p' ? 'Pick your fighter' : (G.picker === 0 ? 'Player 1, pick a fighter' : 'Player 2, pick a fighter');
   $('selHint').textContent = document.body.classList.contains('touch') ? 'Tap a fighter.' :
-    (G.picker === 0 ? 'A / D to choose, J or Enter to pick.' : '← / → to choose, Numpad 1 or Enter to pick.');
+    (G.picker === 0 || G.mode === 'practice' ? 'A / D to choose, J or Enter to pick.' : '← / → to choose, Numpad 1 or Enter to pick.');
 }
 function pick(i) {
   if (G.mode === 'online') {
@@ -84,6 +89,111 @@ function pick(i) {
   } else startMatch();
 }
 
+// move list (from the title menu or the pause menu)
+let movesFrom = 'title', movesFighter = 0, movesPlayer = 0;      // movesPlayer = whose keys the list shows
+const ARROW = {down: '↓', up: '↑', fwd: '→', back: '←'};
+function openMoves() {
+  movesFrom = G.screen === 'game' && G.paused ? 'pause' : 'title';
+  if (movesFrom === 'pause') movesFighter = G.picks[G.mode === 'online' ? NET.side : 0];      // start on your own fighter
+  if (G.mode !== '2p') movesPlayer = 0;      // 1 player and online use Player 1's keys
+  show('moves');
+}
+function buildMoves() {
+  const tabs = $('mtabs');
+  tabs.innerHTML = '';
+  FIGHTERS.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.textContent = d.name; b.style.setProperty('--c', d.shirt);
+    b.classList.toggle('cur', i === movesFighter);
+    b.onclick = () => { movesFighter = i; SFX_RAW.move(); buildMoves(); $('mtabs').children[i].focus(); };
+    tabs.appendChild(b);
+  });
+  // Player 1 / Player 2 keys switch
+  const ptabs = $('mplayer');
+  ptabs.innerHTML = '';
+  [0, 1].forEach(p => {
+    const b = document.createElement('button');
+    b.textContent = 'Player ' + (p + 1) + ' keys'; b.style.setProperty('--c', '#ffcf5a');
+    b.classList.toggle('cur', p === movesPlayer);
+    b.onclick = () => { movesPlayer = p; SFX_RAW.move(); buildMoves(); $('mplayer').children[p].focus(); };
+    ptabs.appendChild(b);
+  });
+  const K = b => '<kbd>' + keyName(KEYMAP[movesPlayer][b][0]) + '</kbd>';      // the key this player uses for b
+  const d = FIGHTERS[movesFighter], sp = d.special;
+  const keysOf = btns => btns.map(b => b === 'fwdKick' ? '<b>→</b>+' + K('kick') : K(b)).join(' ');      // fwdKick = toward + kick
+  const row = (name, how, note) => '<p class="mv"><b>' + name + '</b><span>' + how + '</span>' + (note ? '<small>' + note + '</small>' : '') + '</p>';
+  const seqHow = s => s.dirs.map(x => '<b>' + ARROW[x] + '</b>').join(' ') + ' + ' + K(s.btn);
+  const spHow = seqHow(sp.seq);
+  $('movesKeyHint').innerHTML = '<b>→</b> means toward your rival, <b>←</b> away. ' + K('punch') + ' punch, ' + K('kick') + ' kick.';
+  const lv = m => { const l = levelOf(MOVES[m]); return ' <em class="lv ' + l + '">' + l + '</em>'; };      // high / mid / low tag
+  const strs = (STRINGS[d.id] || []).map(s => row(s.name, keysOf(s.btns), s.moves.map(m => (MOVE_NAMES[m] || m) + lv(m)).join(' → '))).join('');
+  $('movelist').innerHTML =
+    '<div class="wide"><h3>' + d.name + ' – ' + d.title + '</h3>' + row(sp.name, spHow, 'Energy blast, then a short wait to recharge' + lv('special')) +
+    (d.extras || []).map(x => row(x.name, seqHow(x.seq), x.desc + lv(x.move))).join('') +
+    (d.fwdPunch ? row(MOVE_NAMES[d.fwdPunch], '<b>→</b> + ' + K('punch'), 'Long-range poke: about even if blocked, but if it misses you\'re open for a while' + lv(d.fwdPunch)) : '') +
+    (d.fwdKick ? row(MOVE_NAMES[d.fwdKick], '<b>→</b> + ' + K('kick'), 'Slower, longer poke, same idea. Starts a combo string' + lv(d.fwdKick)) : '') +
+    (d.backCharge ? row(MOVE_NAMES[d.backCharge], '<b>←</b> + hold ' + K('punch') + ', let go', 'Hold longer for more damage. Knocks them flying, and pushes them far away if blocked. Easy to hit while charging and after' + lv(d.backCharge)) : '') + '</div>' +
+    '<div><h3>Combo strings</h3>' + (strs || '<p>None yet</p>') +
+    '<p class="hint">Press the buttons one after another. Each hit has to land (or be blocked) to keep the string going. A move marked <i>launches</i> knocks them into the air: keep hitting them before they land. Any punch or kick that lands can also cut into a special (special cancel).</p></div>' +
+    '<div><h3>Everyone</h3>' +
+    row('Jab', K('punch'), 'Level' + lv('punch')) + row('Front kick', K('kick'), 'Level' + lv('kick')) +
+    row('Uppercut', '<b>↓</b> + ' + K('punch'), 'Knocks down' + lv('uppercut')) + row('Leg sweep', '<b>↓</b> + ' + K('kick'), 'Knocks down' + lv('sweep')) +
+    row('Throw', K('punch') + ' + ' + K('kick') + ' together', 'Up close, goes through blocks. Hold <b>←</b> to throw them behind you. Break a throw: ' + K('punch') + ' + ' + K('kick') + ' quickly' + lv('throw')) + row('Air punch', 'Jump + ' + K('punch'), 'Hits through a crouching block. If it connects, carry on with any string that starts with ' + K('punch') + ' as you land' + lv('airPunch')) +
+    row('Air kick', 'Jump + ' + K('kick'), 'Long reach' + lv('airKick')) +
+    row('Dash', '<b>→ →</b> or <b>← ←</b>', 'Punch or kick during it to dash in and hit') + row('Block', 'Hold ' + K('block')) +
+    '<p class="hint"><em class="lv high">high</em> block standing, or crouch to duck under it. <em class="lv mid">mid</em> block standing or crouching. <em class="lv low">low</em> only a crouching block (hold ↓ + ' + K('block') + ') stops it. <em class="lv overhead">overhead</em> comes down from above: hits you even crouching, only a standing block stops it.</p></div>';
+}
+
+// controls: change each player's keys (saved in settings.keymap)
+let ctrlFrom = 'title', binding = null;      // binding = {p, b} while waiting for a key press
+const ACT_NAMES = {up: 'Jump', down: 'Crouch', left: 'Left', right: 'Right', punch: 'Punch', kick: 'Kick', block: 'Block'};
+function openControls() {
+  ctrlFrom = G.screen === 'game' && G.paused ? 'pause' : 'title';
+  binding = null;
+  show('controls');
+}
+function buildControls() {
+  const list = $('bindList');
+  list.innerHTML = '';
+  [0, 1].forEach(p => {
+    const box = document.createElement('div');
+    box.innerHTML = '<h3>Player ' + (p + 1) + '</h3>';
+    for (const b of REBINDABLE) {
+      const row = document.createElement('div'); row.className = 'bind';
+      const spare = KEYMAP[p][b].slice(1).map(keyName).join(', ');
+      row.innerHTML = '<span>' + ACT_NAMES[b] + (spare ? ' <small class="hint">(also ' + spare + ')</small>' : '') + '</span>';
+      const btn = document.createElement('button');
+      const waiting = binding && binding.p === p && binding.b === b;
+      btn.textContent = waiting ? 'Press a key…' : keyName(KEYMAP[p][b][0]);
+      btn.classList.toggle('wait', !!waiting);
+      btn.dataset.bind = p + '.' + b;
+      btn.onclick = () => { binding = {p, b}; SFX_RAW.select(); buildControls(); $('bindHint').textContent = 'Press a key for Player ' + (p + 1) + ' ' + ACT_NAMES[b].toLowerCase() + ' (Esc to cancel).'; };
+      row.appendChild(btn);
+      box.appendChild(row);
+    }
+    list.appendChild(box);
+  });
+  if (!binding) $('bindHint').textContent = 'Click a key box, then press the key you want to use.';
+}
+function bindPress(e) {      // a key was pressed while waiting to bind it
+  e.preventDefault();
+  const {p, b} = binding;
+  if (e.code === 'Escape') binding = null;
+  else if (NO_BIND.has(e.code)) { $('bindHint').textContent = 'That key is for pausing and menus. Pick another one.'; return; }
+  else { bindKey(p, b, e.code); binding = null; SFX_RAW.select(); }
+  buildControls();
+  const btn = document.querySelector('[data-bind="' + p + '.' + b + '"]');
+  if (btn) btn.focus();
+}
+$('resetKeys').onclick = () => { resetKeys(); binding = null; buildControls(); };
+// fill in the chosen keys wherever the help screen shows them (<kbd data-key="0.punch">)
+function showKeyLabels() {
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const [p, b] = el.dataset.key.split('.');
+    el.textContent = keyName(KEYMAP[+p][b][0]);
+  });
+}
+
 // buttons
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-go]');
@@ -92,6 +202,10 @@ document.addEventListener('click', e => {
   if (!go) return;
   SFX_RAW.select();
   const g = go.dataset.go;
+  if (g === 'moves') return openMoves();
+  if (g === 'moves-back') return show(movesFrom);
+  if (g === 'controls') return openControls();
+  if (g === 'controls-back') { binding = null; return show(ctrlFrom); }
   if (G.mode === 'online' && NET.role) {      // online: some buttons act for both players
     if (g === 'resume') return NET.role === 'guest' ? netSend({t: 'pause', v: false}) : show('game');
     if (g === 'restart') return NET.role === 'guest' ? netSend({t: 'rematch'}) : netStart();
@@ -102,7 +216,8 @@ document.addEventListener('click', e => {
   else if (g === 'leave') { closeNet(); show('title'); }
   else if (g === '1p') { G.mode = '1p'; show('level'); }
   else if (g === '2p') { G.mode = '2p'; G.picker = 0; show('select'); }
-  else if (g === 'back-select') { if (G.mode === '2p' && G.picker === 1) { G.picker = 0; markSelect(); } else show(G.mode === '1p' ? 'level' : 'title'); }
+  else if (g === 'practice') { G.mode = 'practice'; G.picker = 0; show('select'); }
+  else if (g === 'back-select') { if ((G.mode === '2p' || G.mode === 'practice') && G.picker === 1) { G.picker = 0; markSelect(); } else show(G.mode === '1p' ? 'level' : 'title'); }
   else if (g === 'select') { G.picker = 0; show('select'); }
   else if (g === 'resume') show('game');
   else if (g === 'restart') startMatch();
@@ -118,11 +233,14 @@ $('pauseBtn').onclick = () => togglePause();
 const GAMEKEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'Quote', 'Slash']);
 addEventListener('keydown', e => {
   ac();
+  if (G.screen === 'controls' && binding) return bindPress(e);
+  if (G.screen === 'controls' && e.code === 'Escape') { e.preventDefault(); return show(ctrlFrom); }
   if (!e.repeat) tapped.add(e.code);
   keys[e.code] = true;
   if (G.screen === 'game') {
-    if (GAMEKEYS.has(e.code)) e.preventDefault();
-    if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); togglePause(); }
+    if (GAMEKEYS.has(e.code) || isGameKey(e.code)) e.preventDefault();
+    // return straight away, or menuKeys below would see the same Escape on the pause screen and close it again
+    if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); togglePause(); return; }
     if (G.paused) menuKeys(e);
     return;
   }
@@ -134,13 +252,18 @@ addEventListener('keydown', e => {
     else if (e.code === 'Escape') document.querySelector('[data-go="back-select"]').click();
     return;
   }
+  if (G.screen === 'moves') {
+    const n = FIGHTERS.length, dir = ['KeyA', 'ArrowLeft'].includes(e.code) ? -1 : ['KeyD', 'ArrowRight'].includes(e.code) ? 1 : 0;
+    if (dir) { e.preventDefault(); $('mtabs').children[(movesFighter + dir + n) % n].click(); return; }
+    if (e.code === 'Escape') { e.preventDefault(); return show(movesFrom); }
+  }
   menuKeys(e);
 });
 function menuKeys(e) {
   if (e.target && e.target.tagName === 'INPUT') return;      // typing a room code
   const scr = document.querySelector('.screen.on');
   if (!scr) return;
-  const btns = [...scr.querySelectorAll('button')];
+  const btns = [...scr.querySelectorAll('button')].filter(b => !b.hidden);      // skip hidden ones (dummy button outside practice)
   const i = btns.indexOf(document.activeElement);
   if (['KeyS', 'ArrowDown'].includes(e.code)) { e.preventDefault(); btns[(i + 1) % btns.length].focus(); SFX.move(); }
   else if (['KeyW', 'ArrowUp'].includes(e.code)) { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); SFX.move(); }
@@ -160,9 +283,10 @@ document.addEventListener('visibilitychange', () => {
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.body.classList.add('touch');
 document.querySelectorAll('#touch [data-k]').forEach(btn => {
-  const k = btn.dataset.k;
+  let k = btn.dataset.k;
   const down = e => {
     e.preventDefault(); ac();
+    if (btn.dataset.a) k = KEYMAP[0][btn.dataset.a][0];      // touch buttons follow Player 1's chosen keys
     if (btn.setPointerCapture) try { btn.setPointerCapture(e.pointerId); } catch (_) {}
     if (!keys[k]) tapped.add(k);
     keys[k] = true; btn.classList.add('on');

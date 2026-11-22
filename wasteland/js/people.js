@@ -161,6 +161,10 @@ function fillTrade(){
  var s=tSums(),give=OFFER.give.map(function(k){return row(gi(BAG[k]),GEAR[BAG[k]].n,sellV(BAG[k])+' caps','give:'+k)}).join(''),
   get=Object.keys(OFFER.get).map(function(k){return row(tIcon(k),tName(k)+(OFFER.get[k]>1?' <span class="n">×'+OFFER.get[k]+'</span>':''),tPrice(k)*OFFER.get[k]+' caps','get:'+k)}).join(''),
   empty='<p class="tdrop">'+(matchMedia('(pointer:coarse)').matches?'Tap items to add them':'Drag or click items to add them')+'</p>';
+ /* the trader's caps that settle the difference sit on the table too, under YOU GET */
+ if(s.net>0)get+=row(icon('cap'),'Bottle caps <span class="n">'+s.net+'</span>','From '+shopN()+'\'s purse');
+ /* and yours under YOU GIVE when you pay the difference */
+ if(s.net<0)give+=row(icon('cap'),'Bottle caps <span class="n">'+(-s.net)+'</span>','From your caps'+(CAPS<-s.net?' (you have '+CAPS+')':''));
  var res=!s.ok&&s.net>purse()?shopN()+' only has '+purse()+' caps to pay you with.':!s.ok&&(OFFER.give.length||s.tv)?'Not enough caps: you need '+(s.tv-s.gv)+' and have '+CAPS+'.':s.net>0?shopN()+' pays you <b>'+s.net+'</b>'+icon('cap')+'caps.':s.net<0?'You pay <b>'+(-s.net)+'</b>'+icon('cap')+'caps.':OFFER.give.length?'An even swap.':'Nothing on the table yet.';
  var mid='<h3>TRADE</h3><div class="tsub">YOU GIVE</div>'+(give||empty)+'<div class="tsub">YOU GET</div>'+(get||empty)
   +'<div class="tsum">Your side: '+s.gv+' caps · '+shopN()+'\'s side: '+s.tv+' caps<br>'+res+'</div><button id="tconf" class="go" type="button"'+(s.ok?'':' disabled')+'>Confirm trade</button>';

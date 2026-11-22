@@ -6,6 +6,14 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
 canvas{display:block;width:100%;height:100%}
 #pauseBtn{position:absolute;top:12.5%;left:50%;transform:translateX(-50%);display:none;padding:2px 10px;font:700 .8rem system-ui;color:var(--ink);background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.2);border-radius:6px;cursor:pointer}
 body.playing #pauseBtn{display:block}
+/* practice mode: dummy settings in the top right, under the dummy's health bar */
+#dummyPanel{position:absolute;top:16%;right:2.5%;display:none;padding:.4em .55em;font:700 clamp(9px,1.15vw,13px) system-ui,sans-serif;color:var(--ink);background:rgba(0,0,0,.55);border-radius:6px;text-align:right}
+body.playing.practice #dummyPanel{display:block}
+#dummyPanel>b{display:block;color:#ffcf5a;letter-spacing:.06em;font-size:.9em;margin-bottom:.25em}
+#dummyPanel .drow{display:flex;align-items:center;justify-content:flex-end;gap:.35em;margin-top:.25em}
+#dummyPanel .drow span{opacity:.75;margin-right:.2em}
+#dummyPanel button{font:inherit;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:.15em .55em;cursor:pointer}
+#dummyPanel button.cur{background:#ffcf5a;color:#111;border-color:#ffcf5a}
 
 /* touch controls */
 #touch{display:none;width:100%;max-width:640px;justify-content:space-between;align-items:center;padding:12px 16px}
@@ -15,6 +23,7 @@ body.touch.playing #touch{display:flex}
 .dpad{grid-template-columns:repeat(3,56px);grid-template-rows:repeat(3,52px)}
 .dpad .u{grid-column:2;grid-row:1}.dpad .l{grid-column:1;grid-row:2}.dpad .r{grid-column:3;grid-row:2}.dpad .d{grid-column:2;grid-row:3}
 .acts{grid-template-columns:repeat(2,72px);grid-template-rows:repeat(2,64px)}
+.acts button:last-child{grid-column:span 2}
 #touch button{font:700 .78rem system-ui;color:var(--ink);background:#22090a;border:2px solid #4a1a17;border-radius:12px;touch-action:none;text-transform:uppercase;letter-spacing:.04em}
 #touch .dpad button{font-size:1.1rem}
 #touch button.on{background:var(--accent);color:#1a0403;border-color:var(--accent)}
@@ -56,6 +65,24 @@ h2{margin:0;font-size:1.6rem;font-style:italic;letter-spacing:.06em;text-transfo
 .help h3{margin:0 0 6px;font-size:.85rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
 .help p{margin:3px 0;font-size:.88rem;line-height:1.45}
 kbd{display:inline-block;min-width:1.5em;padding:0 5px;border:1px solid #5a2a26;border-bottom-width:2px;border-radius:4px;background:#2a0f0e;font:700 .78rem system-ui;text-align:center}
+.mtabs{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.mtabs button{padding:6px 14px;font:700 .85rem system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--panel);border:2px solid var(--line);border-radius:99px;cursor:pointer}
+.mtabs button:focus-visible{outline:none;border-color:var(--accent)}
+.mtabs button.cur{border-color:var(--c);box-shadow:0 0 12px var(--c);color:#fff}
+.mtabs.small button{padding:4px 12px;font-size:.72rem}
+#movelist .wide{grid-column:1/-1}
+#movelist .mv{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px}
+#movelist .mv small{color:var(--dim);width:100%;font-size:.78rem}
+/* attack level tags: high / mid / low */
+#movelist .lv{font-style:normal;font-size:.68rem;font-weight:bold;text-transform:uppercase;padding:0 4px;border-radius:3px;color:#111;white-space:nowrap}
+#movelist .lv.high{background:#ffcf5a}
+#movelist .lv.mid{background:#9fd6ff}
+#movelist .lv.low{background:#ff8f7a}
+#movelist .lv.overhead{background:#c9a3ff}
+#bindList .bind{display:flex;align-items:center;justify-content:space-between;margin:6px 0;padding:0;background:none;border:0}
+#bindList .bind button{min-width:92px;padding:6px 12px;font:800 .95rem system-ui;color:var(--gold);background:#2a0f0e;border:2px solid #5a2a26;border-bottom-width:3px;border-radius:8px;cursor:pointer}
+#bindList .bind button:focus-visible{outline:none;border-color:var(--accent)}
+#bindList .bind button.wait{color:#1a0403;background:var(--gold);border-color:var(--gold)}
 #endSub{color:var(--dim);margin:0 0 6px}
 .joinrow{display:flex;gap:8px;align-items:stretch}
 #joinCode{width:130px;padding:8px 10px;font:800 1.2rem system-ui;letter-spacing:.25em;text-align:center;text-transform:uppercase;color:var(--ink);background:#120506;border:2px solid var(--line);border-radius:10px;-webkit-user-select:text;user-select:text}

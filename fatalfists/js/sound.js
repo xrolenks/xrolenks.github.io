@@ -36,6 +36,8 @@ const SFX_RAW = {
   whoosh() { noise(0.09, 0.12, 2400, 'bandpass'); },
   jump() { tone(240, 0.12, 'sine', 0.08, 420); },
   special() { tone(180, 0.35, 'sawtooth', 0.12, 720); noise(0.25, 0.12, 1500, 'bandpass'); },
+  grab() { tone(260, 0.08, 'square', 0.08, 180); noise(0.07, 0.2, 900); },
+  flame() { noise(0.45, 0.3, 700); tone(110, 0.4, 'sawtooth', 0.08, 260); },      // Fiery Rush roar
   thud() { tone(70, 0.18, 'sine', 0.45, 35); noise(0.12, 0.2, 400); },
   ko() { tone(140, 1.1, 'sawtooth', 0.22, 30); noise(0.8, 0.4, 500); },
   gong() { tone(196, 1.4, 'sine', 0.3); tone(294, 1.1, 'sine', 0.12); tone(392, 0.8, 'triangle', 0.06); },

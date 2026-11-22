@@ -17,11 +17,13 @@ function step() {
     let inp = {held: {}, press: []};
     if (live) {
       if (i === 1 && G.mode === '1p') inp = aiThink(f, foe);
+      else if (i === 1 && G.mode === 'practice') inp = dummyInput();
       else if (i === 1 && G.mode === 'online') inp = {held: NET.rheld, press: NET.rpress.splice(0)};
       else inp = humanInput(G.mode === '2p' ? [KEYMAP[i]] : KEYMAP);
     }
     f.held = inp.held;
-    for (const p of inp.press) f.buf[p] = 8;
+    recordDirs(f, foe);
+    for (const p of inp.press) { f.buf[p] = 8; if (p === 'punch' || p === 'kick') noteThrowInput(f, p); }
   }
   tapped.clear();
   if (G.hitstop > 0) { G.hitstop--; return; }
@@ -35,7 +37,8 @@ function step() {
     if (G.pt >= 115) { G.phase = 'fight'; setMsg(''); }
   } else if (G.phase === 'fight') {
     G.tick++;
-    if (G.tick % 60 === 0 && G.timer > 0) { G.timer--; if (G.timer === 0) endRound(true); }
+    // (no clock in practice)
+    if (G.tick % 60 === 0 && G.timer > 0 && !isPractice()) { G.timer--; if (G.timer === 0) endRound(true); }
   } else if (G.phase === 'ko') {
     if (G.pt === 80) {
       if (G.winner < 0) setMsg('DRAW');
@@ -68,6 +71,7 @@ function step() {
   updateProjectiles();
   separate(a, b);
   if (G.phase === 'fight' && (a.hp <= 0 || b.hp <= 0)) endRound(false);
+  practiceTick();
   updateParts();
   G.shake *= 0.85;
 }
@@ -86,6 +90,15 @@ function dust(x, n) {
   for (let i = 0; i < n; i++) {
     G.parts.push({x: x + (Math.random() - 0.5) * 50, y: GROUND - 2, vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 1.5,
       life: 24, max: 24, color: '#8a6a5a', size: 4 + Math.random() * 4, kind: 'dot'});
+  }
+}
+// flames streaming back from a burning foot (Fiery Rush); dir = way the fighter faces
+function flames(x, y, dir) {
+  netEvent(['flames', x, y, dir]);
+  for (let i = 0; i < 2; i++) {
+    G.parts.push({x: x + (Math.random() - 0.5) * 10, y: y - 6 + (Math.random() - 0.5) * 10,
+      vx: -dir * (1 + Math.random() * 2), vy: -1 - Math.random() * 1.6, life: 10 + rnd(8), max: 18,
+      color: ['#ffd25a', '#ff6a1a'][i], size: 3 + Math.random() * 3, kind: 'dot'});
   }
 }
 function updateParts() {
