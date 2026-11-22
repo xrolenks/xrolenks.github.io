@@ -357,11 +357,12 @@ function init3D(T, Water, Orbit, BU) {
   water.rotation.x = -Math.PI / 2; water.material.uniforms.size.value = 1.4; scene.add(water);
   let RF = 0;
   const reflect = water.onBeforeRender;
-  // (every 3rd frame since 2026-11-20: it costs the most. On Fast graphics the island is hidden while it's drawn, so
-  // the sea only mirrors the sky: nearly free, and the ripples hid the island's reflection anyway.)
+  // (every 3rd frame since 2026-11-20: it costs the most. The island is hidden while it's drawn, so the sea only
+  // mirrors the sky: nearly free. Fancy graphics mirrored the whole island until 2026-11-21, but measured in Rick's
+  // Chrome that cost ~10 ms on each reflecting frame (every object drawn again, and three.js re-picking each one's
+  // program for the reflection picture) while changing only 0.08% of the pixels: the ripples hide it.)
   water.onBeforeRender = function (...a) {
     if (RF % 3) return;
-    if (FANCY) { reflect.apply(this, a); return; }
     const sv = stat.visible, dv = dyn.visible; stat.visible = dyn.visible = false;
     reflect.apply(this, a);
     stat.visible = sv; dyn.visible = dv;
@@ -2273,24 +2274,66 @@ function init3D(T, Water, Orbit, BU) {
   // never gets one big pile of work. One object per kind of material is enough (compile() also covers hidden things
   // and uses the whole scene's lights). frame() still waits (HOLD), at most WARMMAX ms; anything left after that is
   // prepared as it's first drawn, like before. A newer warm() takes over from one still running.
+  // (2026-11-21, Rick saw Fancy freeze ~0.7 s into a new game, and ~1 s when switching to Fancy.) Two kinds of program
+  // were still left to be prepared when first drawn: the shadow pass's depth materials (made inside three.js, so
+  // compile() never saw them) and things drawn into a picture instead of the screen, like the sky in the sea's
+  // reflection (no tone mapping there, so a different program). warm() now prepares those too: shadowJobs() runs the
+  // shadow pass once with drawing switched off just to see which depth materials it uses, and intoTarget() makes
+  // compile() prepare programs for a picture (the reflection) or the shadow map instead of the screen.
+  const WARMRT = new T.WebGLRenderTarget(1, 1);
+  function intoTarget(rt, f) {
+    const old = R.getRenderTarget(); R.setRenderTarget(rt);
+    try { return f(); } finally { R.setRenderTarget(old); }
+  }
+  function shadowJobs() {
+    if (!R.shadowMap.enabled || !sun.castShadow) return [];
+    const got = new Map(), shown = [], rbd = R.renderBufferDirect;
+    scene.traverse(o => { if (!o.visible) { shown.push(o); o.visible = true; } });      // (hidden things cast shadows later)
+    // (three.js reuses one depth material, changing its picture and side for each object: copy it as it is right now)
+    R.renderBufferDirect = (c, s, geo, mat, o) => {
+      const k = [mat.id, !!o.isInstancedMesh, !!o.instanceColor, !!mat.map, !!mat.alphaMap, mat.alphaTest > 0, mat.side].join('|');
+      if (!got.has(k)) got.set(k, [o, mat.clone()]);
+    };
+    try { R.shadowMap.needsUpdate = true; R.shadowMap.render([sun], scene, cam); }
+    catch (e) {}
+    finally { R.renderBufferDirect = rbd; shown.forEach(o => { o.visible = false; }); R.shadowMap.needsUpdate = true; }
+    // A stand-in with the same shape and depth material, so the real object's children aren't prepared for the shadow
+    // map. The shadow pass draws without the scene's fog, so it's taken away while compile() looks.
+    return [...got.values()].map(([o, mat]) => () => {
+      let p = new T.Mesh(o.geometry, mat);
+      if (o.isInstancedMesh) { p = new T.InstancedMesh(o.geometry, mat, 1); p.instanceColor = o.instanceColor; }
+      const fog = scene.fog; scene.fog = null;
+      try { return intoTarget(sun.shadow.map, () => R.compileAsync(p, cam, scene)); } finally { scene.fog = fog; }
+    });
+  }
   let HOLD = false, WARMED = false, WARMRUN = 0;
   const WARMN = 3, WARMMAX = 10000;
   function warm(startup) {
     if (!startup) WARMED = true;
     if (!R.compileAsync) return;
     const seen = new Set(), list = [];
+    const add = (k, job) => { if (!seen.has(k)) { seen.add(k); list.push(job); } };
     scene.traverse(o => {
       [].concat(o.material || []).forEach(m => {
         const k = m.id + '|' + !!o.isInstancedMesh + '|' + !!o.isPoints + '|' + !!o.isSprite + '|' + !!o.isLine;
-        if (!seen.has(k)) { seen.add(k); list.push(o); }
+        add(k, () => R.compileAsync(o, cam, scene));
       });
     });
+    // what the sea's reflection draws: everything on layer 0 except the island (stat, dyn) and the sea itself
+    scene.children.forEach(c => {
+      if (c === stat || c === dyn || c === water) return;
+      c.traverse(o => {
+        if (!o.layers.isEnabled(0)) return;
+        [].concat(o.material || []).forEach(m => add('rt|' + m.id + '|' + !!o.isSprite, () => intoTarget(WARMRT, () => R.compileAsync(o, cam, scene))));
+      });
+    });
+    list.push(...shadowJobs());
     const run = ++WARMRUN, end = performance.now() + WARMMAX;
     HOLD = true;
     return (async () => {      // (a promise: done when this warm-up is over)
       for (let i = 0; i < list.length && run === WARMRUN && !DEAD && performance.now() < end; i += WARMN) {
         try {
-          await Promise.race([Promise.all(list.slice(i, i + WARMN).map(o => R.compileAsync(o, cam, scene))),
+          await Promise.race([Promise.all(list.slice(i, i + WARMN).map(job => job())),
             new Promise(r => setTimeout(r, 3000))]);      // (never stuck on one batch)
         } catch (e) {}
         await new Promise(r => setTimeout(r, 25));      // (a breather for the graphics chip)
