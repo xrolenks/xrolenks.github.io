@@ -200,7 +200,9 @@ function winFx() {
 // --- weather, every few turns ---
 const hash01 = s => { let h = 2166136261; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); } return ((h >>> 0) % 100000) / 100000; };
 let SEENWX = null, WXEND = 0;
+const WEATHERON = false;      // (all weather off for now, Rick 2026-11-22: the clouds went too; set true to bring them back)
 function weatherFx() {
+  if (!WEATHERON) return;
   const now = {id: G.id, tn: G.tn || 0};
   const was = SEENWX; SEENWX = now;
   if (!was || was.id !== now.id || now.tn === was.tn || G.phase === 'over' || G.tut || !D3.on) return;      // (3D only)
