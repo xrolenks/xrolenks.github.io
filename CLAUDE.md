@@ -1,13 +1,18 @@
 # Rick's games site
 
-Static site on GitHub Pages: repo `xrolenks/games`, live at https://xrolenks.github.io/games/ (project site, so every absolute link needs the `/games/` prefix).
+Static site on GitHub Pages, live at https://xrolenks.github.io/games/. Since 2026-11-21 (Rick's request) the repo is the **user site** `xrolenks/xrolenks.github.io` (renamed from `xrolenks/games`), so one repo serves both the bare address and `/games/`. The games live in a `games/` folder so every old `/games/...` link still works; absolute links still use the `/games/` prefix.
 
+Repo root (site-wide files only):
+- `index.html` — redirects the bare `xrolenks.github.io` to `/games/`. Nothing else goes here.
+- `404.html` — GitHub's not-found page for the whole site; "Back to the games" links to `/games/`.
+- `.nojekyll` — serve files as-is.
+- `games/` — everything below:
+
+Inside `games/`:
 - `index.html` — home page; one `<a class="card">` per game, plus a game count next to "Games". Card pictures are small SVGs, except Hex Isles, which uses a real 3D-board screenshot `hexisles/thumb.jpg` (960x600, Rick's request 2026-11-20; made by rendering the Three.js canvas straight to a JPEG mid-way through an all-computer game).
-- `404.html` — "Back to the games" links to `/games/`.
 - `wasteland/` — **Wild Wasteland**, a turn-based wasteland RPG (no build, no dependencies, no image files): `index.html`, `css/style.css`, `js/*.js` (split 2026-11-20). Notes: `wasteland/CLAUDE.md`.
 - `hexisles/` — **Hex Isles**, a hex-island building board game (no build step). Since 2026-11-19 (Rick's request) it's split by job: `index.html` (page HTML), `css/style.css`, `js/*.js`, `sound-effects/*.wav` (see `hexisles/CLAUDE.md` for the file map). Notes: `hexisles/CLAUDE.md`.
 - `fatalfists/` — **Fatal Fists**, a one-on-one arcade fighter (vs computer, 2 players on one keyboard, or online): `index.html`, `css/style.css`, `js/*.js` (split 2026-11-20). Notes: `fatalfists/CLAUDE.md`.
-- `.nojekyll` — serve files as-is.
 
 **Originality rule (Rick's update, 2026-11-18):** a game may use features and rules similar to an existing game (game rules and mechanics themselves can't be owned; fan-made games like colonist.io work this way), as long as everything you see and read is our own:
 - **Own name** for the game and its modes/expansions (never another game's title or brand, e.g. not "Catan", "Settlers", "Cities & Knights").
@@ -37,13 +42,13 @@ Each game folder has its own `CLAUDE.md` with that game's code map and Rick's ru
 
 ## Previewing / testing
 
-The Browser pane's `file://` preview does **not** run the games' JS (buttons do nothing). Always serve over http. A minimal PowerShell server (run in the background, write it to the scratchpad), which also maps the `/games` prefix:
+The Browser pane's `file://` preview does **not** run the games' JS (buttons do nothing). Always serve over http, with the repo root as `$Root` (it holds `games/`, so URLs match the live site). A minimal PowerShell server (run in the background, write it to the scratchpad):
 
 ```powershell
 param([string]$Root,[int]$Port=8765)
 $l=New-Object System.Net.HttpListener;$l.Prefixes.Add("http://localhost:$Port/");$l.Start()
 $t=@{'.html'='text/html; charset=utf-8';'.css'='text/css';'.js'='text/javascript';'.png'='image/png';'.svg'='image/svg+xml';'.json'='application/json';'.wav'='audio/wav'}
-while($l.IsListening){$c=$l.GetContext();$p=[Uri]::UnescapeDataString($c.Request.Url.AbsolutePath) -replace '^/games',''
+while($l.IsListening){$c=$l.GetContext();$p=[Uri]::UnescapeDataString($c.Request.Url.AbsolutePath)
  $f=Join-Path $Root $p.TrimStart('/');if(Test-Path $f -PathType Container){$f=Join-Path $f 'index.html'}
  $code=200;if(-not(Test-Path $f -PathType Leaf)){$f=Join-Path $Root '404.html';$code=404}
  $b=[IO.File]::ReadAllBytes($f);$c.Response.StatusCode=$code;$x=[IO.Path]::GetExtension($f)
