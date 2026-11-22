@@ -625,6 +625,7 @@ function newGame(cfg, fg, level, timer) {
   if (G.timer) { say('Turn timer: ' + timeName(G.timer) + ' a turn.'); clockCheck(); }
 }
 
+const TURNMARK = '― ';      // a log line starting with this marks the start of that player's turn (drawn as a divider)
 function say(t) { G.log.push(t); if (G.log.length > 40) G.log.shift(); G.said = (G.said || 0) + 1; }      // G.said counts lines ever said (sounds use it)
 function setupOrder() { const a = G.pl.map((_, i) => i); return a.concat(a.slice().reverse()); }
 // --- Awards: longest route and most Storm Callers played, 2 points each ---
@@ -769,9 +770,27 @@ function spots(p, what) {
 
 // ---------- The one place the game changes ----------
 // who = the player doing it (wifi: the sender's seat). Left out = whoever's turn it is.
+// Undo (Rick, 2026-11-21): a person can take back their last build or knight move until they do anything else (roll,
+// trade, play a card, end the turn…). Only moves with no luck or hidden cards in them can be undone. G.undo =
+// {p: seat, t: move, g: the game before it, as JSON without the log}; any other successful move clears it.
+const UNDOABLE = ['road', 'town', 'fort', 'wall', 'guard', 'train', 'activate', 'kmove', 'improve'];
+const UNDONAME = {road: 'road', town: 'town', fort: 'fort', wall: 'wall', guard: 'knight', train: 'training', activate: 'knight on duty', kmove: 'knight move', improve: 'improvement'};
+function undoLast(who) {
+  const u = G.undo, p = who == null ? G.turn : who;
+  if (!u || u.p !== p || G.turn !== p || (G.phase !== 'main' && G.phase !== 'setup')) return false;
+  const log = G.log, said = G.said, B = JSON.parse(u.g);
+  Object.keys(G).forEach(k => delete G[k]); Object.assign(G, B);      // (G stays the same object)
+  G.log = log; G.said = said; G.undo = null;
+  say(G.pl[p].name + ' took back the ' + UNDONAME[u.t] + '.');
+  return true;
+}
+const canUndo = () => !!(G && G.undo && G.undo.p === G.turn && myTurn() && (G.phase === 'main' || G.phase === 'setup') && !G.offer);
 function act(a, who) {
+  if (a && a.t === 'undo') { if (!undoLast(who)) return false; clockCheck(); return true; }
   const had = a && a.t === 'roll' && G ? G.pl.map((_, i) => handSize(i)) : null;      // hands before a roll (for the harvest stat)
+  const p0 = G ? G.turn : 0, before = a && G && UNDOABLE.includes(a.t) && !G.pl[p0].bot && (who == null || who === p0) ? (({undo, log, ...rest}) => JSON.stringify(rest))(G) : null;
   if (!act1(a, who)) return false;
+  G.undo = before && G.phase !== 'over' ? {p: p0, t: a.t, g: before} : null;
   if (G.phase !== 'over' && G.phase !== 'setup') { awards(); if (G.phase === 'main') checkWin(G.turn); }
   cardLimit();
   stat(a, had);
@@ -1037,6 +1056,7 @@ function mainRest(p, a) {
     G.turn = (G.turn + 1) % G.pl.length; G.phase = 'roll';
     if (G.deck) { G.tn++; G.played = false; G.free = 0; }
     G.mkt = null; G.fleetT = null;      // Market Day / Trade Fleet last one turn
+    say(TURNMARK + G.pl[G.turn].name);      // a divider in the log (drawLog in dice.js; Rick, 2026-11-21)
     return true;
   }
   return false;

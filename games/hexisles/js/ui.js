@@ -173,6 +173,11 @@ $('b-end').onclick = () => {      // (Forts and Knights: over the progress card 
   if (G.decks && G.pl[G.turn].cards.length > PCMAX) return tossChoose(G.turn, () => go({t: 'end'}));
   go({t: 'end'});
 };
+// Undo the last build (rules.js undoLast): the button over the map, or Ctrl+Z (Cmd+Z on a Mac) when not typing in a box
+$('undo').onclick = () => { if (canUndo()) go({t: 'undo'}); };
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !(e.target.closest && e.target.closest('input, textarea')) && canUndo()) { e.preventDefault(); go({t: 'undo'}); }
+});
 ['road', 'town', 'fort', 'wall'].forEach(w => { $('b-' + w).onclick = () => { MODE = MODE === w ? null : w; render(); }; });
 // --- the Guards button and its menu (Forts and Knights) ---
 const GMODES = ['guard', 'train', 'activate', 'kmove', 'gchase'];

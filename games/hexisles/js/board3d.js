@@ -1698,7 +1698,7 @@ function init3D(T, Water, Orbit, BU) {
   let GHOST = null, GKEY = '';
   function ghostOff() { if (GHOST) scene.remove(GHOST); GHOST = null; GKEY = ''; }
   function ghost3D(u) {
-    const what = placing(), key = u && what ? what + JSON.stringify(u) : '';
+    const what = ghostKind(), key = u && what ? what + JSON.stringify(u) : '';
     if (key === GKEY) return;
     ghostOff(); GKEY = key;
     if (!key) return;
@@ -1710,6 +1710,7 @@ function init3D(T, Water, Orbit, BU) {
       o.scale.set(S * .74, TOP - .1, 5.6); o.rotation.y = Math.atan2(-(B.y - A.y), B.x - A.x);
     } else if ((what === 'town' || what === 'fort') && u.v != null) o = building(u.v, {p, l: what === 'fort' ? 2 : 1});
     else if (u.v != null && (what === 'guard' || what === 'train' || what === 'activate')) o = guard3D(u.v, {p, s: !gd ? 1 : what === 'train' ? gd.s + 1 : gd.s, a: 1});
+    else if (u.v != null && (o = kmoveGhost(u.v))) o = guard3D(u.v, o);      // moving a knight: it arrives there, resting (Rick, 2026-11-21)
     if (!o) return;
     const m = ghostMat(p);
     o.traverse(c => { if (c.isSprite) c.visible = false; else if (c.isMesh) { c.material = m; c.castShadow = c.receiveShadow = false; } });

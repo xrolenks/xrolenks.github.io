@@ -32,6 +32,8 @@
     <div id="view"><div id="zoom"><svg id="board" viewBox="-312 -280 624 540" role="img" aria-label="The island board"></svg><svg id="ships" viewBox="-312 -280 624 540" aria-hidden="true"></svg></div><div id="roll" aria-hidden="true"></div>
       <div id="zbtns"><button id="z-in" title="Zoom in (or scroll up on the map)">+</button><button id="z-out" title="Zoom out (or scroll down on the map)">&minus;</button><button id="z-reset" title="Back to the whole island">&#10226;</button><button id="z-3d" title="Switch between the 3D island and the flat map">3D</button></div></div>
     <div id="log" title="Click to open or close the log"></div>
+    <div id="raidpath" hidden></div>
+    <button id="undo" hidden title="Take back your last build (Ctrl+Z)"></button>
     <!-- the trade offer on the table, top right of the map: what's offered and each player's answer -->
     <div id="offers" hidden></div>
     <!-- How to play: the tutorial's coach box (js/tutorial.js) -->
@@ -61,7 +63,6 @@
     </div>
   </div>
   <div id="side">
-    <div id="raiders" hidden></div>
     <div id="tip" hidden></div>
     <div id="gmenu" class="popmenu" hidden></div>
     <div id="imenu" class="popmenu" hidden></div>

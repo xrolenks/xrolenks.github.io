@@ -119,6 +119,59 @@ function message() {
   if (G.decks && P.cards.length > PCMAX && G.phase === 'main') return '<b>' + n + '</b>: you hold ' + P.cards.length + ' progress cards. Play some, or throw extras away when you end your turn (' + PCMAX + ' is the most you can keep).';
   return '<b>' + n + '</b>: build, trade, or end your turn.';
 }
+// ---- The log waits for the animations (Rick, 2026-11-21: lines showed up before the event had happened) ----
+// Each new line gets a time to appear (LOGAT: line number from G.said → Date.now() ms). A roll's lines wait for the
+// dice to land; in 3D a raid's lines wait for the fleet to land and the battle (see raidStep/battleStep in board3d.js),
+// and a knight chase's line waits for the bandit to reach its new land. Lines never jump ahead of earlier ones.
+let LOGSEEN = null, LOGAT = {}, LOGT = null;
+const RAIDLAND = 3000, RAIDCLASH = 6700, RAIDDONE = 8400;      // ms after the dice land: fleet ashore, battle decided, knights home
+function logDelay(t, in3d) {
+  if (!in3d || !G.fg) return 0;
+  if (/^The raiders landed!|sailed home|couldn't break into/.test(t)) return RAIDLAND;
+  if (/drove them off|^Raiders! /.test(t)) return RAIDCLASH;
+  if (/^Worn out from the battle|^The raiders sacked a fort/.test(t)) return RAIDDONE;
+  return 0;
+}
+function logHold() {
+  const s = {id: G.id, said: G.said || 0, rolls: G.rolls || 0, chase: G.chase ? G.chase.n : 0};
+  const was = LOGSEEN; LOGSEEN = s;
+  if (!was || was.id !== s.id || s.said <= was.said) { if (!was || was.id !== s.id) LOGAT = {}; return; }
+  const now = Date.now(), base = now + (s.rolls !== was.rolls ? DICEMS : 0), in3d = D3.on && D3.ready;
+  const chased = s.chase !== was.chase && G.chase;
+  let prev = Math.max(now, ...Object.values(LOGAT));      // (never before a line still waiting)
+  const k = Math.min(s.said - was.said, G.log.length);
+  G.log.slice(-k).forEach((t, j) => {
+    let at = base + logDelay(t, in3d);
+    if (chased && / sent the bandit /.test(t)) at = Math.max(at, now + (in3d ? 3800 : CHASE2MS) * .85);
+    at = Math.min(Math.max(at, prev), now + 15000);
+    prev = at;
+    if (at > now) LOGAT[s.said - k + 1 + j] = at;
+  });
+}
+function logLine(t) {
+  if (t.startsWith(TURNMARK)) {
+    const n = t.slice(TURNMARK.length), i = G.pl.findIndex(P => P.name === n);
+    return '<div class="turnrule" style="--c:' + (PCOL[i] || 'var(--dim)') + '"><span>' + (/^you$/i.test(n) ? 'Your' : esc(n) + '’s') + ' turn</span></div>';
+  }
+  let h = esc(t);
+  const names = G.pl.map((P, i) => [esc(P.name), PCOL[i]]).filter(([n]) => n).sort((a, b) => b[0].length - a[0].length);
+  if (names.length) {
+    const re = new RegExp('(^|[^\\w])(' + names.map(([n]) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w])', 'g');
+    h = h.replace(re, (m, pre, n) => pre + '<b style="color:' + names.find(x => x[0] === n)[1] + '">' + n + '</b>');
+  }
+  return '<div>' + h + '</div>';
+}
+function drawLog() {
+  if (!G) return;
+  const now = Date.now(), first = (G.said || 0) - G.log.length + 1;
+  let shown = G.log.length, next = 0;
+  for (let j = 0; j < G.log.length; j++) { const at = LOGAT[first + j]; if (at > now) { shown = j; next = at; break; } }
+  for (const n in LOGAT) if (LOGAT[n] <= now) delete LOGAT[n];
+  // the log over the map; its last line (gold) says what to do now. Players' names are in their colours, and each
+  // turn starts with a thin divider in that player's colour (Rick, 2026-11-21)
+  const L = $('log'); L.innerHTML = G.log.slice(0, shown).map(logLine).join('') + '<div class="now">' + message() + '</div>'; L.scrollTop = L.scrollHeight;
+  clearTimeout(LOGT); LOGT = next ? setTimeout(drawLog, next - now + 20) : null;
+}
 function render() {
   if (!G) return;
   useColors();      // (the players' picked colours, js/rules.js)
@@ -185,16 +238,12 @@ function render() {
   // the resource fan, after the progress cards: it spreads its cards over whatever width #hand has left (2026-11-20)
   $('hand').innerHTML = handHTML(G.pl[VIEW] ? G.pl[VIEW].res : null);
   $('b-wall').parentNode.hidden = !G.fg;
-  $('b-guards').parentNode.hidden = $('b-imp').parentNode.hidden = $('raiders').hidden = !G.fg;
+  $('b-guards').parentNode.hidden = $('b-imp').parentNode.hidden = !G.fg;
   if (G.fg) { fillGuards(p, main); fillImprove(p, main); } else $('gmenu').hidden = $('imenu').hidden = true;
-  if (G.fg) {      // the raider track: how close the fleet is, and forts (what they'd raid) against the island's defence
-    const def = islandDefence(), str = fortCount(), f = G.fleet || 0;
-    $('raiders').innerHTML = '<div class="rt"><b>Raiders</b>' + Array.from({length: FLEETMAX}, (_, k) => '<svg viewBox="-12 -12 24 24"' + (k < f ? ' class="on"' : '') + '>' + SEAICON.raid + '</svg>').join('') + '</div>' +
-      '<div class="rv"><span title="Raid strength = forts on the island">Raiders <em>' + str + '</em></span><span title="Knights on duty">Defence <em class="' + (def >= str ? 'safe' : 'risk') + '">' + def + '</em></span></div>' +
-      '<div>' + (f >= FLEETMAX - 1 ? 'They land on the next raider roll!' : (FLEETMAX - f) + ' raider rolls until they land.') + '</div>';
-  }
-  // the log over the map; its last line (gold) says what to do now
-  const L = $('log'); L.innerHTML = G.log.map(t => '<div>' + esc(t) + '</div>').join('') + '<div class="now">' + message() + '</div>'; L.scrollTop = L.scrollHeight;
+  undoBtn();      // (js/draw2d.js)
+  raidPath();      // the raiders' sea lane over the map, with forts vs defence (js/draw2d.js; replaced the side column's Raiders panel, Rick 2026-11-21)
+  logHold();
+  drawLog();
   if (PICK && !main && !(human && G.phase === 'roll')) PICK = null;      // (a card played before rolling can ask for a pick)
   SWHO = PICK ? -1 : sciWho();      // Forts and Knights: a Science level 3 pick waiting (js/ui.js)
   $('m-pick').hidden = !(PICK || SWHO >= 0);

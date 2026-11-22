@@ -486,6 +486,84 @@ function raidFx() {
   SEENRAID = n;
   if (fresh && D3.on && D3.raid) D3.raid(G.raidfx);
 }
+// The raiders' sea lane over the map (Rick, 2026-11-21: "a visual path that shows how close the raiders are"). A wavy
+// lane from the open sea (left) to the island (right) with one mark per raider roll (FLEETMAX); the raider ship sits on
+// the mark for G.fleet and glides to the next one after the dice land (after the whole raid in 3D when it goes home).
+let RPSEEN = null;
+// puts a box laid over the map (#raidpath, #undo) at the bottom of the map's sea: just above the bar when the bar lies over the map (wide screens)
+function overBar(el) {
+  const W = $('boardwrap').getBoundingClientRect(), V = $('view').getBoundingClientRect(), B = $('bar').getBoundingClientRect();
+  const floor = B.top > V.top && B.top < V.bottom ? B.top : V.bottom;
+  el.style.bottom = Math.round(W.bottom - floor + 8) + 'px';
+}
+// Undo (Rick, 2026-11-21; the rule is undoLast in rules.js): a small button at the bottom left of the map while the last build can be taken back
+function undoBtn() {
+  const b = $('undo'), on = canUndo();
+  b.hidden = !on;
+  if (!on) return;
+  overBar(b);
+  b.textContent = '↶ Undo ' + UNDONAME[G.undo.t];
+}
+const RPX = k => 20 + k * (250 / FLEETMAX), RPY = x => 30 + Math.sin(x / 22) * 5;
+function raidPath() {
+  const box = $('raidpath');
+  box.hidden = !G.fg || G.phase === 'setup';
+  if (box.hidden) { RPSEEN = null; return; }
+  overBar(box);      // bottom right of the map's sea
+  const f = Math.min(G.fleet || 0, FLEETMAX), near = f >= FLEETMAX - 1;
+  if (!box.firstChild) {
+    let lane = '';
+    for (let x = 14; x <= 276; x += 4) lane += (lane ? 'L' : 'M') + x + ' ' + RPY(x).toFixed(1);
+    const marks = Array.from({length: FLEETMAX - 1}, (_, k) => '<circle class="rp-m" cx="' + RPX(k + 1) + '" cy="' + RPY(RPX(k + 1)).toFixed(1) + '" r="3.2"/>').join('');
+    box.innerHTML = '<div class="rp-top"><span><b>Raiders</b> <span class="rp-n"></span></span><em class="rp-w"></em></div>' +
+      '<svg viewBox="0 0 300 50" aria-hidden="true"><path d="' + lane + '" fill="none" stroke="rgba(140,200,255,.35)" stroke-width="2" stroke-dasharray="5 5"/>' +
+      '<path class="rp-done" d="" fill="none" stroke="#e0524a" stroke-width="2.5" stroke-linecap="round"/>' + marks +
+      // the island at the end: sand, grass, a little fort with a flag
+      '<g transform="translate(' + RPX(FLEETMAX) + ' ' + RPY(RPX(FLEETMAX)).toFixed(1) + ')"><ellipse cx="0" cy="6" rx="17" ry="6" fill="#d9c08a"/><ellipse cx="0" cy="4" rx="13" ry="4.5" fill="#5e9a48"/>' +
+      '<rect x="-5" y="-8" width="10" height="11" fill="#a49a8a" stroke="#3a332a" stroke-width=".8"/><path d="M-5-8v-2h2v2h1.5v-2h2v2h1.5v-2h2v2" fill="#a49a8a" stroke="#3a332a" stroke-width=".8"/>' +
+      '<path d="M0-10V-17" stroke="#3a332a" stroke-width=".9"/><path d="M0-17L6-15L0-13Z" fill="#e8b84a"/></g>' +
+      '<g class="rp-ship"><g transform="scale(1.25)">' + SEAICON.raid + '</g></g></svg>' +
+      '<div class="rp-v"><span title="Raiders\' power = forts on the island">Raiders\' power <em class="rp-s"></em></span><span title="Strength of every knight on duty">Island defence <em class="rp-d"></em></span></div>';
+  }
+  // raiders' power (forts on the island) against the island's defence (knights on duty): always up to date
+  const def = islandDefence(), str = fortCount(), D = box.querySelector('.rp-d');
+  box.querySelector('.rp-s').textContent = str; D.textContent = def; D.className = 'rp-d ' + (def >= str ? 'safe' : 'risk');
+  const s = {id: G.id, f, rolls: G.rolls || 0, raids: G.raids || 0}, was = RPSEEN; RPSEEN = s;
+  const fresh = !was || was.id !== s.id;
+  if (fresh) { clearTimeout(RPT); rpPaint(f); return; }      // (first draw, new game, load: no animation)
+  if (was.f === f && was.raids === s.raids) return;
+  // the fleet moved: wait for the dice to land, then glide; a raid sails all the way in, waits out the landing, and a new fleet starts far out
+  const raided = was.raids !== s.raids, rolled = was.rolls !== s.rolls, from = RPAT;
+  clearTimeout(RPT);
+  RPT = setTimeout(() => {
+    if (!G || !RPSEEN || RPSEEN.id !== s.id) return;
+    const ship = box.querySelector('.rp-ship');
+    if (raided) {
+      rpPaint(FLEETMAX);
+      const stay = D3.on && D3.ready ? RAIDDONE : 1500;
+      ship.animate([{transform: rpPos(from)}, {transform: rpPos(FLEETMAX), offset: 1100 / (1100 + stay + 900)}, {transform: rpPos(FLEETMAX), opacity: 1, offset: (1100 + stay) / (1100 + stay + 900)}, {transform: rpPos(FLEETMAX), opacity: 0}],
+        {duration: 1100 + stay + 900, easing: 'ease-in-out'});
+      RPT = setTimeout(() => { if (G && RPSEEN && RPSEEN.id === s.id) { rpPaint(RPSEEN.f); ship.animate([{opacity: 0}, {opacity: 1}], {duration: 600}); } }, 1100 + stay + 900);
+    } else {
+      rpPaint(f);
+      ship.animate([{transform: rpPos(from)}, {transform: rpPos(f)}], {duration: 1100, easing: 'cubic-bezier(.45,0,.3,1)'});
+    }
+  }, rolled ? DICEMS : 0);
+}
+let RPT = null, RPAT = 0;
+function rpPos(k) { const x = RPX(k) - (k >= FLEETMAX ? 16 : 0); return 'translate(' + x.toFixed(1) + 'px,' + (RPY(x) - 4).toFixed(1) + 'px)'; }
+function rpPaint(f) {      // the text, the red trail, the marks passed and the ship's resting place, for fleet step f
+  const box = $('raidpath'), near = f === FLEETMAX - 1;
+  RPAT = f;
+  box.querySelector('.rp-n').textContent = Math.min(f, FLEETMAX) + ' of ' + FLEETMAX;
+  box.querySelector('.rp-w').textContent = f >= FLEETMAX ? 'They\'ve landed!' : near ? 'Next raider roll lands!' : (FLEETMAX - f) + ' raider rolls to go';
+  box.classList.toggle('near', f >= FLEETMAX - 1);
+  box.querySelectorAll('.rp-m').forEach((m, k) => { const on = k < f; m.setAttribute('fill', on ? '#e0524a' : 'rgba(8,18,28,.9)'); m.setAttribute('stroke', on ? '#ffb0a8' : 'rgba(140,200,255,.6)'); });
+  let done = '';
+  for (let x = RPX(0); x <= RPX(Math.min(f, FLEETMAX)) - (f >= FLEETMAX ? 16 : 0) + .1; x += 4) done += (done ? 'L' : 'M') + x.toFixed(1) + ' ' + RPY(x).toFixed(1);
+  box.querySelector('.rp-done').setAttribute('d', f ? done : '');
+  box.querySelector('.rp-ship').style.transform = rpPos(f);
+}
 // Robbing (2026-11-19, Rick's request): the handed-over card lifts out of the robbed player's hand (or profile)
 // and flies in an arc to the robber's hand (or profile). G.robfx = {n counter, from, to, r}; played when n
 // changes, on every screen, never on load. Only the two players involved see which resource it is; everyone
@@ -778,6 +856,8 @@ function drawBoard() {
   if (D3.on) D3.update();
 }
 // --- see-through preview (Rick, 2026-11-19): pointing at a glowing spot shows the piece you'd build there ---
+// what the see-through preview shows: like placing(), but Forts and Knights' second setup placement is a fort (Rick, 2026-11-21)
+const ghostKind = () => { const w = placing(); return w === 'town' && G.phase === 'setup' && G.fg && G.su.k >= G.pl.length ? 'fort' : w; };
 function ghostMarkup(what, d) {
   const p = G.turn;
   if (what === 'road' && d.e != null) { const e = +d.e; return '<line ' + seg(e, .16) + ' stroke="#111" stroke-width="10" stroke-linecap="round"/><line ' + seg(e, .16) + ' stroke="' + PCOL[p] + '" stroke-width="5.5" stroke-linecap="round"/>'; }
@@ -786,11 +866,20 @@ function ghostMarkup(what, d) {
     const g = guards()[d.v] || {p, s: 1};
     return guard2D(+d.v, {p, s: what === 'train' ? g.s + 1 : g.s, a: 1});
   }
+  const k = d.v != null && kmoveGhost(+d.v);
+  if (k) return guard2D(+d.v, k);
   return '';
+}
+// Moving a knight (Rick, 2026-11-21): once a knight is picked (KFROM), pointing at a corner it can walk to previews it
+// there, resting, as it will be when it arrives. Returns the knight as it would stand there, or null.
+function kmoveGhost(v) {
+  if (placing() !== 'kmove' || KFROM == null || !kmoveTo(G.turn, KFROM).includes(v)) return null;
+  const g = guards()[KFROM];
+  return g ? {p: g.p, s: g.s, a: 0} : null;
 }
 $('board').addEventListener('pointerover', e => {
   const t = e.target.closest('.hit'), g = $('ghost2d');
-  if (g) g.innerHTML = t && placing() ? ghostMarkup(placing(), t.dataset) : '';
+  if (g) g.innerHTML = t && placing() ? ghostMarkup(ghostKind(), t.dataset) : '';
 });
 $('board').addEventListener('pointerout', e => { const g = $('ghost2d'); if (g && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.hit'))) g.innerHTML = ''; });
 // Award badges shown on a player's profile
