@@ -51,7 +51,7 @@ const SFXLINES = [
   [/ banner: | castle: | the .* castle from |castle is now permanent| (built|took) the (Grand Library|Grand Market|Mighty Castle)| is now permanent/, 'award'], [/ to level \d/, 'sparkle'], [/ draws? a progress card/, 'card'],
   [/ sent the bandit /, 'stomp'], [/ robbed /, 'swipe'], [/ handed .* a card\.| discarded /, 'card'],
   [/ bought a progress card/, 'card'], [/ played /, 'play'], [/\(Science bonus\)/, 'sparkle'],
-  [/ offers /, 'pop'], [/ accepted the trade/, 'yes'], [/ said no to | turned down |Nobody wanted| took the offer back/, 'no'],
+  [/ offers /, 'pop'], [/ accepted the trade/, 'yes'], [/ said no to | turned down |Nobody wanted| took back the offer| can no longer offer/, 'no'],
   [/ gave .* to .* for | traded \d+ /, 'coins'],
   [/ goes to /, 'award'], [/ won the game!/, 'win'], [/ is back\.| lost connection|reconnect/, 'blip']
 ];

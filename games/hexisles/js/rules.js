@@ -340,7 +340,7 @@ function raidFight(str, def, pw) {
 }
 // forts the raiders can take from player i: plain forts (not castles, nor Keeps/Citadels from older saves; walls don't help)
 const sackable = i => Object.keys(G.b).filter(v => G.b[v].p === i && G.b[v].l === 2 && !G.b[v].u && !G.b[v].c).map(Number);
-function sackFort(i, v) { G.b[v].l = 1; if (G.raidfx && G.raidfx.v) G.raidfx.v.push(+v); say('The raiders sacked a fort: ' + G.pl[i].name + ' loses it, and it\'s a town again.'); }
+function sackFort(i, v) { G.b[v].l = 1; G.b[v].sk = 1; if (G.raidfx && G.raidfx.v) G.raidfx.v.push(+v); say('The raiders sacked a fort: ' + G.pl[i].name + ' loses it, and it\'s a town until they rebuild it (before any new fort).'); }
 // ---------- Forts and Knights progress cards (Rick, 2026-11-18) ----------
 // 54 cards: 18 per track (Rick, 2026-11-18). One deck per track (G.decks[k], made in newGame; played cards go to G.usedT[k] and are shuffled back in when that deck
 // runs out). Inspired by the expansion Rick pointed at, with Hex Isles' own names, pictures (CARDART) and wording, and
@@ -402,7 +402,7 @@ const cheapFort = {stone: 2, grain: 1};
 function fgCan(p, c) {
   const I = FGCARDS[c]; if (!I || I.vp) return false;
   if (I.when === 'roll') return G.phase === 'roll';
-  if ((G.phase !== 'main' && G.phase !== 'roll') || G.offer) return false;      // (before rolling too, Rick 2026-11-19)
+  if ((G.phase !== 'main' && G.phase !== 'roll') || offerOpen()) return false;      // (before rolling too, Rick 2026-11-19)
   if (c === 'magi' && !banditAwake()) return false;      // (the bandit sleeps until the first raid)
   if (I.need === 'player') return fgTargets(p, c).length > 0;
   if (c === 'mason') return Object.keys(TRACKS).some(k => okImprove(p, k)) && !G.pl[p].mason;
@@ -442,7 +442,7 @@ function playFG(p, a) {
   if (c === 'healer') {
     const v = spots(p, 'fort').sort((x, y) => vScore(y) - vScore(x))[0];
     for (const r in cheapFort) P.res[r] -= cheapFort[r];
-    G.b[v].l = 2; say(N + ' and raised a fort for 2 Stone and 1 Grain.'); castleCheck(p);
+    G.b[v].l = 2; delete G.b[v].sk; say(N + ' and raised a fort for 2 Stone and 1 Grain.'); castleCheck(p);
   }
   if (c === 'survey') { G.free = 2; say(N + ': 2 free roads.'); }
   if (c === 'armour') { const es = spots(p, 'train').slice(0, 2); es.forEach(e => { G.gd[e].s++; }); say(N + ' and trained ' + es.length + (es.length > 1 ? ' knights.' : ' knight.')); }
@@ -707,20 +707,22 @@ function sevenPhase() {
 function cards(p) { return RES.reduce((s, r) => s + G.pl[p].res[r], 0); }
 // --- Robbing (Classic) ---
 // After moving the bandit, the mover picks who to rob among the other players with a town or fort on that
-// land who hold cards (phase 'rob', G.rob = {opts}; skipped when only one could be robbed). Then the robbed
-// player picks which card to hand over (phase 'give', G.rob = {by, from}). Computer players answer at once.
+// land who hold cards (phase 'rob', G.rob = {opts}; skipped when only one could be robbed). Then the
+// mover takes one of the robbed player's cards at random (Rick, 2026-11-22: was "the robbed player picks",
+// phase 'give'; that phase and its window only remain for an online game reloaded mid-pick).
 function robOpts(p, h) { return [...new Set(HEX[h].v.map(v => G.b[v] && G.b[v].p).filter(q => q != null && q !== p && handSize(q) > 0))]; }
 function startGive(p, v) {
   G.rob = {by: p, from: v}; G.phase = 'give';
-  say(G.pl[p].name + ' robbed ' + G.pl[v].name + '.');
-  if (G.pl[v].bot) giveCard(v, botGive(v));
+  const R = G.pl[v].res, deck = [];
+  KINDS().forEach(r => { for (let i = 0; i < (R[r] || 0); i++) deck.push(r); });      // every card in the hand equally likely
+  giveCard(v, deck[rnd(deck.length)]);
 }
 function giveCard(v, r) {
   if (G.phase !== 'give' || !G.rob || G.rob.from !== v || !KINDS().includes(r) || !(G.pl[v].res[r] >= 1)) return false;
   const T = G.pl[G.rob.by];
   G.pl[v].res[r]--; T.res[r] = (T.res[r] || 0) + 1;
   G.robfx = {n: (G.robfx ? G.robfx.n : 0) + 1, from: v, to: G.rob.by, r};      // the card flies from one player to the other (robFx)
-  say(G.pl[v].name + ' handed ' + T.name + ' a card.');
+  say(T.name + ' robbed ' + G.pl[v].name + ' and took a random card.');
   G.rob = null; G.phase = backPhase();
   return true;
 }
@@ -734,12 +736,17 @@ function botRob(p) {       // who a computer player robs: Easy anyone, Normal th
   return o.slice().sort((a, b) => (L === 2 ? (pubScore(b) - pubScore(a)) * 100 : 0) + cards(b) - cards(a))[0];
 }
 function roadCount(p) { let n = 0; for (const e in G.r) if (G.r[e] === p) n++; return n; }
+// Piece limits (Rick, 2026-11-22): 15 roads, 5 towns, 4 forts each. Turning a town into a fort frees that town.
+const MAXTOWNS = 5, MAXFORTS = 4, MAXOF = {road: MAXROADS, town: MAXTOWNS, fort: MAXFORTS};
+function levelCount(p, l) { let n = 0; for (const v in G.b) if (G.b[v].p === p && G.b[v].l === l) n++; return n; }
+const piecesLeft = (p, w) => MAXOF[w] - (w === 'road' ? roadCount(p) : levelCount(p, w === 'town' ? 1 : 2));
 function canPay(p, what) { const c = COST[what]; return Object.keys(c).every(r => G.pl[p].res[r] >= c[r]); }
 function pay(p, what) { const c = COST[what]; for (const r in c) G.pl[p].res[r] -= c[r]; }
 
 // ---------- Where can things go? ----------
 function okTown(p, v, setup) {
   if (G.b[v] || VERT[v].n.some(n => G.b[n]) || guards()[v]) return false;      // (a knight's corner is taken too)
+  if (!setup && levelCount(p, 1) >= MAXTOWNS) return false;      // (all 5 towns are on the island)
   return setup || VERT[v].e.some(e => G.r[e] === p);
 }
 function okRoad(p, e, setup) {
@@ -749,7 +756,13 @@ function okRoad(p, e, setup) {
   // (another player's town, fort or knight on that corner blocks building on past it)
   return ends.some(v => G.b[v] ? G.b[v].p === p : cutsRoute(p, v) ? false : VERT[v].e.some(x => G.r[x] === p));
 }
-function okFort(p, v) { return !!G.b[v] && G.b[v].p === p && G.b[v].l === 1; }
+// A sacked fort is a town for now (b.sk, Rick 2026-11-22: allowed even past MAXTOWNS), and while a player has one,
+// only those can become forts: they must be rebuilt before any new fort.
+const sackedTowns = p => Object.keys(G.b).filter(v => G.b[v].p === p && G.b[v].l === 1 && G.b[v].sk);
+function okFort(p, v) {
+  if (!G.b[v] || G.b[v].p !== p || G.b[v].l !== 1 || levelCount(p, 2) >= MAXFORTS) return false;
+  return !!G.b[v].sk || !sackedTowns(p).length;
+}
 function spots(p, what) {
   const setup = G.phase === 'setup';
   if (what === 'road') return roadCount(p) >= MAXROADS && !setup ? [] : EDGE.map((_, e) => e).filter(e => okRoad(p, e, setup));
@@ -773,24 +786,35 @@ function spots(p, what) {
 // Undo (Rick, 2026-11-21): a person can take back their last build or knight move until they do anything else (roll,
 // trade, play a card, end the turn…). Only moves with no luck or hidden cards in them can be undone. G.undo =
 // {p: seat, t: move, g: the game before it, as JSON without the log}; any other successful move clears it.
-const UNDOABLE = ['road', 'town', 'fort', 'wall', 'guard', 'train', 'activate', 'kmove', 'improve'];
+// Time limit and progress cards (Rick, 2026-11-22): the button only lasts UNDOMS after the move (G.undo.until, the
+// host's clock), and playing a progress card can be taken back too, unless it involved luck (any Math.random during
+// the move: Snoop, Shrewd Dealer, Firebrand, Grand Feast…), moved the bandit (the turn goes on to the bandit), or
+// showed what others were holding (NOUNDO: Tribute, Resource Levy, Guild Charter, Harbour Dues).
+const UNDOABLE = ['road', 'town', 'fort', 'wall', 'guard', 'train', 'activate', 'kmove', 'improve', 'card'];
 const UNDONAME = {road: 'road', town: 'town', fort: 'fort', wall: 'wall', guard: 'knight', train: 'training', activate: 'knight on duty', kmove: 'knight move', improve: 'improvement'};
+const NOUNDO = ['k', 'm', 'magi', 'levy', 'guild', 'dues'], UNDOMS = 6000, UNDOLAG = 1500;      // (UNDOLAG: a guest's click can take a moment to reach the host)
+const undoName = u => u.t === 'card' ? CINFO(u.c) ? CINFO(u.c).n : 'card' : UNDONAME[u.t];
+const hostNow = () => Date.now() + (NET.role === 'guest' && NET.skew ? NET.skew : 0);      // (guests: the host's clock)
+const undoLeft = () => G && G.undo && G.undo.until ? G.undo.until - hostNow() : 0;
 function undoLast(who) {
   const u = G.undo, p = who == null ? G.turn : who;
-  if (!u || u.p !== p || G.turn !== p || (G.phase !== 'main' && G.phase !== 'setup')) return false;
+  if (!u || u.p !== p || G.turn !== p || G.phase !== u.ph || !(Date.now() <= u.until + UNDOLAG)) return false;
   const log = G.log, said = G.said, B = JSON.parse(u.g);
   Object.keys(G).forEach(k => delete G[k]); Object.assign(G, B);      // (G stays the same object)
   G.log = log; G.said = said; G.undo = null;
-  say(G.pl[p].name + ' took back the ' + UNDONAME[u.t] + '.');
+  say(G.pl[p].name + ' took back the ' + undoName(u) + '.');
   return true;
 }
-const canUndo = () => !!(G && G.undo && G.undo.p === G.turn && myTurn() && (G.phase === 'main' || G.phase === 'setup') && !G.offer);
+const canUndo = () => !!(G && G.undo && G.undo.p === G.turn && myTurn() && G.phase === G.undo.ph && !offerOpen() && undoLeft() > 0);
 function act(a, who) {
   if (a && a.t === 'undo') { if (!undoLast(who)) return false; clockCheck(); return true; }
   const had = a && a.t === 'roll' && G ? G.pl.map((_, i) => handSize(i)) : null;      // hands before a roll (for the harvest stat)
-  const p0 = G ? G.turn : 0, before = a && G && UNDOABLE.includes(a.t) && !G.pl[p0].bot && (who == null || who === p0) ? (({undo, log, ...rest}) => JSON.stringify(rest))(G) : null;
-  if (!act1(a, who)) return false;
-  G.undo = before && G.phase !== 'over' ? {p: p0, t: a.t, g: before} : null;
+  const p0 = G ? G.turn : 0, before = a && G && UNDOABLE.includes(a.t) && !NOUNDO.includes(a.c) && !G.pl[p0].bot && (who == null || who === p0) ? (({undo, log, ...rest}) => JSON.stringify(rest))(G) : null;
+  const R0 = Math.random; let luck = false;
+  if (before) Math.random = () => { luck = true; return R0(); };      // (notice any luck in the move)
+  let ok; try { ok = act1(a, who); } finally { Math.random = R0; }
+  if (!ok) return false;
+  G.undo = before && !luck && G.phase !== 'over' && (G.phase === 'main' || G.phase === 'setup' || G.phase === 'roll') ? {p: p0, t: a.t, c: a.c, ph: G.phase, until: Date.now() + UNDOMS, g: before} : null;
   if (G.phase !== 'over' && G.phase !== 'setup') { awards(); if (G.phase === 'main') checkWin(G.turn); }
   cardLimit();
   stat(a, had);
@@ -798,7 +822,7 @@ function act(a, who) {
   return true;
 }
 // --- Trading between players ---
-// G.offer = {from, give, get, yes: [seats that accepted], no: [seats that said no], x: [seats the offerer turned down]}.
+// An offer = {id, from, give, get, yes: [seats that accepted], no: [seats that said no], x: [seats the offerer turned down]}, in G.offers.
 // The player whose turn it is offers; the others accept or decline (computer players at once). Nothing is
 // swapped until the offerer picks one who accepted ({t:'confirm',p}, the tick) or turns them down ({t:'reject',p}, the cross).
 // The offer closes when the trade is done, taken back, or nobody is left who might still trade.
@@ -817,41 +841,56 @@ function botLikes(i, o) {       // they must have spare cards, not lose out on c
 }
 const lvl = () => G.lvl == null ? 1 : G.lvl;      // computer players' level: 0 Easy, 1 Normal, 2 Hard (older saves: Normal)
 function offerFix(o) { o.yes = o.yes || []; o.x = o.x || []; return o; }       // older saves had no yes/x lists
+// Several offers at once (Rick, 2026-11-22): G.offers = [offer, …] (oldest first; each has an id from G.oid), up to
+// OFFERMAX. Answers, ticks, crosses and taking back name the offer ({…, o: id}; without one, the newest). While any is
+// open, nothing else happens except more offers. (G.offer, a single offer, is turned into the list when loading.)
+const OFFERMAX = 4;
+const OFFERS = () => G && G.offers || [];
+const offerOpen = () => OFFERS().length > 0;
+const getOffer = id => { const L = OFFERS(); const o = id == null ? L[L.length - 1] : L.find(x => x.id === id); return o ? offerFix(o) : null; };
+function dropOffer(o) { G.offers = OFFERS().filter(x => x !== o); }
 // a player's answer so far: 'yes', 'no', 'x' (turned down by the offerer) or null (still thinking)
 function offerState(o, p) { return o.yes.includes(p) ? 'yes' : o.no.includes(p) ? 'no' : o.x.includes(p) ? 'x' : null; }
-function offerDone() {          // close the offer once nobody is left who could still trade
-  const o = G.offer;
-  if (!o.yes.length && G.pl.every((P, i) => i === o.from || offerState(o, i))) { G.offer = null; say('Nobody wanted that trade.'); }
+function offerDone(o) {          // close an offer once nobody is left who could still trade
+  if (!o.yes.length && G.pl.every((P, i) => i === o.from || offerState(o, i))) { dropOffer(o); say('Nobody wanted ' + fmt(o.give) + ' for ' + fmt(o.get) + '.'); }
 }
-function answer(p, t) {
-  const o = G.offer && offerFix(G.offer);
+function answer(p, t, id) {
+  const o = getOffer(id);
   if (!o || G.phase !== 'main' || p === o.from || !G.pl[p] || offerState(o, p)) return false;
   if (t === 'accept') {
     if (!has(p, o.get)) return false;
-    o.yes.push(p); say(G.pl[p].name + ' accepted the trade.');
+    o.yes.push(p); say(G.pl[p].name + ' accepted the trade (' + fmt(o.get) + ' for ' + fmt(o.give) + ').');
   } else { o.no.push(p); say(G.pl[p].name + ' said no to the trade.'); }
-  offerDone();
+  offerDone(o);
   return true;
 }
 // the offerer's tick (swap with p) or cross (turn p down)
-function settle(p, ok) {
-  const o = G.offer && offerFix(G.offer);
+function settle(p, ok, id) {
+  const o = getOffer(id);
   if (!o || !Number.isInteger(p) || !o.yes.includes(p)) return false;
   if (ok) {
     if (!has(p, o.get) || !has(o.from, o.give)) return false;
     RES.forEach(r => { const a = o.give[r] || 0, b = o.get[r] || 0; G.pl[o.from].res[r] += b - a; G.pl[p].res[r] += a - b; });
     say(G.pl[o.from].name + ' gave ' + fmt(o.give) + ' to ' + G.pl[p].name + ' for ' + fmt(o.get) + '.');
-    G.offer = null; return true;
+    dropOffer(o);
+    // the other offers: anyone who can no longer pay their side is out, and an offer the offerer can't pay any more closes
+    OFFERS().slice().forEach(q => {
+      if (!has(q.from, q.give)) { dropOffer(q); say(G.pl[q.from].name + ' can no longer offer ' + fmt(q.give) + '.'); return; }
+      q.yes.slice().forEach(i => { if (!has(i, q.get)) { q.yes.splice(q.yes.indexOf(i), 1); q.no.push(i); } });
+      G.pl.forEach((P, i) => { if (i !== q.from && !offerState(q, i) && !has(i, q.get)) q.no.push(i); });
+      offerDone(q);
+    });
+    return true;
   }
   o.yes.splice(o.yes.indexOf(p), 1); o.x.push(p);
   say(G.pl[o.from].name + ' turned down ' + G.pl[p].name + '.');
-  offerDone();
+  offerDone(o);
   return true;
 }
 function act1(a, who) {
   if (!G || G.phase === 'over' || !a) return false;
   if (a.t === 'discard') return discard(who == null ? a.p : who, a.res);
-  if (a.t === 'accept' || a.t === 'decline') return answer(who == null ? a.p : who, a.t);
+  if (a.t === 'accept' || a.t === 'decline') return answer(who == null ? a.p : who, a.t, a.o);
   if (a.t === 'give') return giveCard(who == null ? (G.rob && G.rob.from) : who, a.r);
   if (a.t === 'sack') return sackPick(who == null ? a.p : who, a.v);
   if (a.t === 'tpick') return tpickDo(who == null ? a.p : who, a.k);
@@ -953,18 +992,24 @@ function act1(a, who) {
   }
   if (a.t === 'card' && G.deck && CARDS[a.c] && G.phase === 'roll') return classicCard(p, a);      // (before rolling)
   if (G.phase !== 'main') return false;
-  if (a.t === 'offer' && !G.offer) {
+  if (a.t === 'offer' && OFFERS().length < OFFERMAX) {
     const give = cleanRes(a.give), get = cleanRes(a.get);
     if (!give || !get || !has(p, give) || RES.some(r => give[r] && get[r])) return false;
-    G.offer = {from: p, give, get, yes: [], no: [], x: []};
+    if (OFFERS().some(o => JSON.stringify(o.give) === JSON.stringify(give) && JSON.stringify(o.get) === JSON.stringify(get))) return false;      // (already on the table)
+    const o = {id: G.oid = (G.oid || 0) + 1, from: p, give, get, yes: [], no: [], x: []};
+    G.offers = OFFERS().concat([o]);
     say(P.name + ' offers ' + fmt(give) + ' for ' + fmt(get) + '.');
-    // computer players answer straight away
-    G.pl.forEach((Q, i) => { if (i !== p && Q.bot && G.offer) answer(i, has(i, get) && botLikes(i, G.offer) ? 'accept' : 'decline'); });
+    // anyone without the cards asked for says no at once (Rick, 2026-11-22); computer players answer straight away
+    G.pl.forEach((Q, i) => {
+      if (i === p || !OFFERS().includes(o)) return;
+      if (!has(i, get)) { o.no.push(i); say(Q.name + " doesn't have the cards for that trade."); offerDone(o); }
+      else if (Q.bot) answer(i, botLikes(i, o) ? 'accept' : 'decline', o.id);
+    });
     return true;
   }
-  if ((a.t === 'confirm' || a.t === 'reject') && G.offer) return settle(a.p, a.t === 'confirm');
-  if (a.t === 'cancel' && G.offer) { G.offer = null; say(P.name + ' took the offer back.'); return true; }
-  if (G.offer) return false;        /* nothing else until the offer is answered or taken back */
+  if ((a.t === 'confirm' || a.t === 'reject') && offerOpen()) return settle(a.p, a.t === 'confirm', a.o);
+  if (a.t === 'cancel' && offerOpen()) { const o = getOffer(a.o); if (!o) return false; dropOffer(o); say(P.name + ' took back the offer of ' + fmt(o.give) + '.'); return true; }
+  if (offerOpen()) return false;        /* nothing else until the offers are answered or taken back */
   if (a.t === 'road' && (G.free > 0 || canPay(p, 'road')) && roadCount(p) < MAXROADS && okRoad(p, a.e, false)) {
     if (G.free > 0) G.free--; else pay(p, 'road');
     G.r[a.e] = p; say(P.name + ' built a road.'); return true;
@@ -981,7 +1026,7 @@ function act1(a, who) {
 // Classic progress cards: one per turn, in the main phase or before rolling (Rick, 2026-11-19)
 function classicCard(p, a) {
   const P = G.pl[p];
-  if (G.played || a.c === 'p' || !(G.phase === 'main' || G.phase === 'roll') || G.offer) return false;
+  if (G.played || a.c === 'p' || !(G.phase === 'main' || G.phase === 'roll') || offerOpen()) return false;
   {
     const k = P.cards.findIndex(x => x.c === a.c && x.n < G.tn);       // not one bought this turn
     if (k < 0) return false;
@@ -1004,7 +1049,7 @@ function classicCard(p, a) {
 function mainRest(p, a) {
   const P = G.pl[p];
   if (a.t === 'fort' && canPay(p, 'fort') && okFort(p, a.v)) {
-    pay(p, 'fort'); G.b[a.v].l = 2; say(P.name + ' raised a fort.'); castleCheck(p); return checkWin(p);      // (a waiting castle claim can use the new fort)
+    pay(p, 'fort'); G.b[a.v].l = 2; delete G.b[a.v].sk; say(P.name + ' raised a fort.'); castleCheck(p); return checkWin(p);      // (a waiting castle claim can use the new fort)
   }
   if (a.t === 'wall' && canPay(p, 'wall') && okWall(p, a.v)) {
     pay(p, 'wall'); G.b[a.v].w = 1; say(P.name + ' built a wall.'); return true;

@@ -146,12 +146,13 @@ function botStep() {
   if (G.cdisc) return;      // (waiting for a person to throw away a progress card)
   if (G.boot) return;       // (online: waiting for everyone's island; the host re-renders, and so restarts this, when it's over)
   const p = G.turn, P = G.pl[p];
-  if (G.offer && G.offer.from === p) {      // a bot's own trade offer: take the first yes, or wait a bit for people, then take it back
-    const o = offerFix(G.offer);
-    if (o.yes.length) { go({t: 'confirm', p: o.yes[0]}); return; }
+  const mine = OFFERS().filter(o => o.from === p).map(offerFix);
+  if (mine.length) {      // a bot's own trade offer: take the first yes, or wait a bit for people, then take it back
+    const o = mine[0];
+    if (o.yes.length) { go({t: 'confirm', p: o.yes[0], o: o.id}); return; }
     o.w = (o.w || 0) + 1;
     if (o.w < 12) { BOTT = setTimeout(botStep, 700); return; }
-    go({t: 'cancel'}); return;
+    go({t: 'cancel', o: o.id}); return;
   }
   let a;
   if (G.phase === 'setup') a = G.su.step === 'town' ? {t: 'town', v: bestOf(spots(p, 'town'), p)} : {t: 'road', e: bestRoad(p, spots(p, 'road'), true)};

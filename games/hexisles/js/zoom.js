@@ -54,6 +54,6 @@ function zoomAt(k, cx, cy) {      // cx, cy: the point in the window that stays 
   addEventListener('resize', applyZoom);
   applyZoom();
 }
-addEventListener('resize', () => { if (G) $('hand').innerHTML = handHTML(G.pl[VIEW] ? G.pl[VIEW].res : null); });
+addEventListener('resize', () => { if (G) $('hand').innerHTML = handHTML(G.pl[VIEW] ? shownRes(VIEW) : null); });
 fitBoard();
 

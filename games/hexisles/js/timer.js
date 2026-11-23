@@ -65,7 +65,7 @@ function timeStep(p) {      // one move made for them; false when there's nothin
   if (G.phase === 'sack') { G.sack.slice().forEach(i => sackPick(i, sackable(i).sort((a, b) => vScore(a) - vScore(b))[0])); return true; }
   if (G.phase === 'tpick') { G.tpick.slice().forEach(i => tpickDo(i, bestTrack(i))); return true; }
   if (G.pl[p].bot) return false;      // a computer's own turn carries on by itself
-  if (G.offer) { G.offer = null; say('The trade offer was taken back.'); return true; }
+  if (offerOpen()) { G.offers = []; say('The trade offers were taken back.'); return true; }
   let a;
   if (G.phase === 'setup') a = G.su.step === 'town' ? {t: 'town', v: bestOf(spots(p, 'town'), p)} : {t: 'road', e: bestRoad(p, spots(p, 'road'), true)};
   else if (G.phase === 'roll') a = {t: 'roll'};

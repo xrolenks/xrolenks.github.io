@@ -89,7 +89,8 @@ function message() {
   if (G.boot) return 'Waiting for everyone\'s island to load…';      // (online, before the first turn: online.js)
   if (G.cdisc) return 'Waiting for ' + G.cdisc.map(i => '<b>' + esc(G.pl[i].name) + '</b>').join(' and ') + ' to throw away a progress card (' + PCMAX + ' is the most you can keep)…';
   if (G.phase === 'discard') return 'A 7! Waiting for ' + Object.keys(G.disc).map(i => '<b>' + esc(G.pl[i].name) + '</b>').join(' and ') + ' to discard…';
-  if (G.offer) return offerFix(G.offer).yes.length && mySeat(G.offer.from) ? '<b>' + n + '</b>: tap ✓ to trade with someone who accepted, or ✗ to turn them down.' : '<b>' + n + '</b> offers ' + fmt(G.offer.give) + ' for ' + fmt(G.offer.get) + '. Waiting for answers…';
+  if (offerOpen()) { const L = OFFERS().map(offerFix);
+    return L.some(o => o.yes.length) && mySeat(L[0].from) ? '<b>' + n + '</b>: tap ✓ to trade with someone who accepted, or ✗ to turn them down.' : '<b>' + n + '</b> has ' + (L.length > 1 ? L.length + ' trade offers' : 'a trade offer') + ' on the table. Waiting for answers…'; }
   if (G.phase === 'give') return 'Waiting for <b>' + esc(G.pl[G.rob.from].name) + '</b> to hand <b>' + n + '</b> a card…';
   if (G.phase === 'rob' && myTurn()) return '<b>' + n + '</b>: choose who to rob.';
   if (G.phase === 'tpick') {
@@ -179,7 +180,7 @@ function render() {
   if (NET.role) VIEW = NET.seat; else if (human) VIEW = p;
   drawBoard();
   $('netinfo').hidden = !NET.role; $('netinfo').textContent = NET.role ? 'Room ' + NET.code : '';
-  $('players').innerHTML = G.pl.map((P, i) => '<div class="pl' + (i === p && G.phase !== 'over' ? ' cur' : '') + '" style="--c:' + PCOL[i] + '"><div class="av">' + esc(P.name.charAt(0).toUpperCase()) + '</div><div class="pi"><b>' + esc(P.name) + (NET.role && i === NET.seat ? ' (you)' : P.gone ? ' (away)' : '') + '</b><span><em>' + (G.phase === 'over' || i === VIEW ? score(i) : pubScore(i)) + ' pts</em>' + (G.fg ? ' · Defence ' + defence(i) : '') + '</span><span>' + handSize(i) + (G.deck ? ' res · ' + P.cards.length + ' cards' : ' cards') + '</span><span>Route ' + roadLen(i) + (G.deck ? ' · Knights ' + callers(i) : '') + '</span>' +
+  $('players').innerHTML = G.pl.map((P, i) => '<div class="pl' + (i === p && G.phase !== 'over' ? ' cur' : '') + '" style="--c:' + PCOL[i] + '"><div class="av">' + esc(P.name.charAt(0).toUpperCase()) + '</div><div class="pi"><b>' + esc(P.name) + (NET.role && i === NET.seat ? ' (you)' : P.gone ? ' (away)' : '') + '</b><span><em>' + (G.phase === 'over' || i === VIEW ? score(i) : pubScore(i)) + ' pts</em>' + (G.fg ? ' · Defence ' + defence(i) : '') + '</span><span><i class="hs" style="font-style:normal">' + (handSize(i) - heldCount(i)) + '</i>' + (G.deck ? ' res · ' + P.cards.length + ' cards' : ' cards') + '</span><span>Route ' + roadLen(i) + (G.deck ? ' · Knights ' + callers(i) : '') + '</span>' +
     (G.fg ? '<span>' + Object.keys(TRACKS).map(k => '<i style="font-style:normal;color:' + TRACKS[k].c + '">' + TRACKS[k].n.slice(0, 3) + ' ' + imp(i, k) + '</i>').join(' · ') + '</span>' : '') +
     '</div><div class="aw">' + (G.lr === i ? AWICON.route : '') + (G.la === i ? AWICON.army : '') + (P.hero ? AWICON.hero(P.hero) : '') +
     Object.keys(TRACKS).filter(k => (G.banner || {})[k] === i).map(k => AWICON.banner(k)).join('') +
@@ -192,10 +193,10 @@ function render() {
   robFx();      // (before the hand is redrawn: the stolen card starts from where it was)
   turnPop();
   awardFx(); weatherFx(); winFx(); takeFx();      // award banner, passing weather, the winner's celebration (js/flair.js)
-  const main = human && G.phase === 'main' && !G.offer;     /* while an offer is open, only the offer panel works */
-  if (G.offer) MODE = null;
+  const main = human && G.phase === 'main' && !offerOpen();     /* while an offer is open, only the offer panel works (and making more offers) */
+  if (offerOpen()) MODE = null;
   $('b-end').disabled = !main;
-  $('b-trade').disabled = !(main && handSize(p) > 0);
+  $('b-trade').disabled = !(human && G.phase === 'main' && handSize(p) > 0 && OFFERS().length < OFFERMAX);
   fillOffers();
   ['road', 'town', 'fort', 'wall'].forEach(w => {
     const b = $('b-' + w);
@@ -219,7 +220,7 @@ function render() {
       // (data-tip/data-tn: the hover bubble, see cardTip in draw2d.js)
       if (c === 'p') return '<button class="pc vp" disabled style="--a:' + A.col[0] + ';--b:' + A.col[1] + '" data-tn="' + I.n + '" data-tip="' + I.d + '" aria-label="' + I.n + ': ' + I.d + '">' + face + '</button>';
       // (before rolling too, both modes; Forts and Knights has no one-per-turn limit — Rick, 2026-11-19)
-      const can = G.decks ? myTurn() && VIEW === p && ready && fgCan(p, c) : (main || (human && G.phase === 'roll' && !G.offer)) && VIEW === p && !G.played && ready;
+      const can = G.decks ? myTurn() && VIEW === p && ready && fgCan(p, c) : (main || (human && G.phase === 'roll' && !offerOpen())) && VIEW === p && !G.played && ready;
       return '<button class="pc" data-c="' + c + '" style="--a:' + A.col[0] + ';--b:' + A.col[1] + '" data-tn="' + I.n + '" data-tip="' + I.d + '" data-note="' + (ready ? (can ? 'Tap to play it.' : '') : 'New this turn: you can play it next turn.') + '" aria-label="' + I.n + ': ' + I.d + '"' + (can ? '' : ' disabled') + '>' + face + (ready ? '' : '<em>NEW</em>') + '</button>';
     }).join('') + (vp ? '<span class="none">Point cards scored: <b style="color:var(--accent)">' + vp + '</b></span>' : '') + '</div>';
   }
@@ -236,7 +237,8 @@ function render() {
     }
   }
   // the resource fan, after the progress cards: it spreads its cards over whatever width #hand has left (2026-11-20)
-  $('hand').innerHTML = handHTML(G.pl[VIEW] ? G.pl[VIEW].res : null);
+  $('hand').innerHTML = handHTML(G.pl[VIEW] ? shownRes(VIEW) : null);      // (minus harvested cards still flying in: draw2d.js)
+  holdNote();
   $('b-wall').parentNode.hidden = !G.fg;
   $('b-guards').parentNode.hidden = $('b-imp').parentNode.hidden = !G.fg;
   if (G.fg) { fillGuards(p, main); fillImprove(p, main); } else $('gmenu').hidden = $('imenu').hidden = true;

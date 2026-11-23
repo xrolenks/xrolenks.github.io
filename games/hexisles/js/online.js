@@ -55,14 +55,43 @@ function fillLobby() {
   $('l-msg').textContent = NET.msg || '';
   // my row (only there can I pick); colours taken = the other people's (a computer player's colour is free: it moves)
   const me = host ? 0 : names.indexOf(NET.name), humans = host ? 1 + NET.conns.length : NET.hu || names.length;
+  // My row (Rick, 2026-11-22): a name box to rename myself before the game starts, and a "Change colour" button
+  // (the round colour dot alone wasn't obvious). Keep what I'm typing if the lobby redraws meanwhile.
+  const ed = document.activeElement && document.activeElement.id === 'l-myname' ? document.activeElement : null;
+  const canName = canRename();
   $('l-names').innerHTML = names.map((n, i) => { const c = cols[i] || DEFCOL[i] || '#888', mine = i === me;
-    return '<div class="row">' + cdot(i, c, mine) + '<span>' + esc(n) + (mine ? ' (you)' : '') + '</span></div>' + (mine && CPICK === i ? cpal(i, c, cols.filter((u, k) => k !== i && k < humans)) : ''); }).join('');
+    const label = mine && canName ? '<input id="l-myname" maxlength="12" value="' + esc(n) + '" aria-label="Your name" title="Type a new name, then press Enter">'
+      : '<span class="lname">' + esc(n) + (mine ? ' (you)' : '') + '</span>';
+    return '<div class="row">' + cdot(i, c, mine) + label + (mine ? '<button class="cbtn" data-cp="' + i + '">' + (CPICK === i ? 'Done' : 'Change colour') + '</button>' : '') + '</div>' +
+      (mine && CPICK === i ? cpal(i, c, cols.filter((u, k) => k !== i && k < humans)) : ''); }).join('');
+  const box = $('l-myname');
+  if (box && ed) { box.value = ed.value; box.focus(); try { box.setSelectionRange(ed.selectionStart, ed.selectionEnd); } catch (x) {} }
   $('l-bots').hidden = !host;
   if (host) $('l-bots').innerHTML = '<span style="flex:1">Computer players</span>' + [0, 1, 2, 3].map(n => '<button data-n="' + n + '"' + (n === NET.bots ? ' class="on"' : '') + (n > maxBots() ? ' disabled' : '') + '>' + n + '</button>').join('');
   fillMode('l-mode', host);
   $('l-start').hidden = !host; $('l-start').disabled = !NET.ready || names.length < 2;
   $('l-rejoin').hidden = !(NET.role === 'guest' && NET.lost);
   $('l-cancel').hidden = !(G && NET.inGame && !NET.lost);
+}
+// Renaming in the lobby: only before a game starts (or once it's over), so a seat's name never changes mid-game
+// (rejoining after a drop-out finds the seat by name). The host renames itself; a guest asks with {t:'name', name}.
+function canRename() {
+  if (NET.inGame && !(G && G.phase === 'over')) return false;
+  return NET.role === 'host' || !!(NET.conn && NET.conn.open && !NET.lost);
+}
+function freeName(want, not) {      // want, or "want 2", "want 3"… if another player already has it
+  const taken = lobbyNames().filter((n, i) => i !== not);
+  let name = want, k = 2;
+  while (taken.includes(name)) name = want.slice(0, 10) + ' ' + k++;
+  return name;
+}
+function renameMe(raw) {
+  const want = String(raw || '').trim().slice(0, 12);
+  if (!want || want === NET.name || !canRename()) { fillLobby(); return; }
+  try { localStorage.setItem(NAMEKEY, want); } catch (e) {}      // (remembered for next time)
+  $('n-name').value = want;
+  if (NET.role === 'host') { NET.name = freeName(want, 0); sendLobby(); }
+  else { NET.conn.send({t: 'name', name: want}); }      // the host answers with 'you' and a new lobby
 }
 function sendLobby() {
   NET.names = lobbyNames(); NET.cols = lobbyColors(NET.names.length);
@@ -84,20 +113,27 @@ function hostOpen() {
   const peer = NET.peer = new Peer(ROOM + NET.code);
   peer.on('open', () => {
     NET.ready = true; NET.msg = 'Waiting for players…'; sendLobby();
-    if (NET.resume) {      // back after a reload: same code, give everyone time to rejoin
-      NET.resume = false;
+    if (NET.resume) {      // back after a reload (or taking over from a lost host): same code, give everyone time to rejoin
+      NET.resume = false; RECON = null;
+      if (NET.takeover) say(NET.name + ' is hosting the game now.');
       if (G.pl.some(P => P.wait)) { say('Room ' + NET.code + ' is open again.'); setTimeout(hostWaitOver, WAITMS); }
       save(); render();
     }
   });
   peer.on('connection', c => {
-    c.on('data', d => hostData(c, d));
+    c.on('data', d => { c.heard = Date.now(); hostData(c, d); });
     c.on('close', () => hostDrop(c));
     c.on('error', () => hostDrop(c));
   });
   peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
   peer.on('error', e => {
     if (NET.ready) return;
+    // the room is taken: another player may be hosting this game now (see takeOver), so join them as a guest
+    if ((NET.takeover || NET.resume) && e.type === 'unavailable-id' && RECON && RECON.n < RETRIES * 2) {
+      RECON.n++; try { peer.destroy(); } catch (x) {}
+      NET.seat = RECON.seat; return joinStart(NET.name, NET.code, true, Math.min(RECON.n, RETRIES - 1));
+    }
+    if (NET.takeover) { try { peer.destroy(); } catch (x) {} NET.seat = RECON ? RECON.seat : NET.seat; return joinStart(NET.name, NET.code, true, RECON ? Math.min(RECON.n, RETRIES - 1) : 0); }      // (some other error: back to trying to join)
     // after a reload the old room can take a few seconds to free up: keep trying the same code
     if (NET.resume && NET.tries++ < RETRIES) { peer.destroy(); setTimeout(hostOpen, 2000); return; }
     if (NET.resume) {      // still no luck: carry on with a new code
@@ -128,6 +164,10 @@ function hostData(c, d) {
     c.send({t: 'you', name}); sendLobby();
     if (NET.inGame) c.send({t: 'state', g: G, seat: -1});       // game already running: they watch until the next one
   }
+  if (d.t === 'name' && NET.conns.includes(c) && (!NET.inGame || G.phase === 'over')) {      // a guest renames itself in the lobby
+    const want = String(d.name || '').trim().slice(0, 12);
+    if (want && want !== c.name) { c.name = freeName(want, 1 + NET.conns.indexOf(c)); c.send({t: 'you', name: c.name}); sendLobby(); }
+  }
   if (d.t === 'color' && NET.conns.includes(c) && COLORS.some(q => q[1] === d.c) && !humanColors(c).includes(d.c)) { c.color = d.c; sendLobby(); }      // a guest picks a colour in the lobby
   if (d.t === 'ready' && NET.inGame && G && G.boot && d.id === G.id) { G.boot.s = G.boot.s.filter(s => s !== c.seat); bootCheck(); }      // (their island is ready)
   if (d.t === 'act' && NET.inGame && c.seat >= 0 && d.a && !G.boot) {
@@ -150,8 +190,7 @@ function seatGone(s) {
   const P = G.pl[s];
   P.gone = true; P.bot = true; delete P.wait;
   cardLimit();      // (they owed a progress card: the computer throws one away for them)
-  if (G.offer && G.offer.from === s) G.offer = null;      // their trade offer goes with them
-  else if (G.offer) answer(s, 'decline');
+  OFFERS().slice().forEach(o => { if (o.from === s) dropOffer(o); else answer(s, 'decline', o.id); });      // their trade offers go with them; they say no to the rest
   if (G.phase === 'discard' && G.disc[s]) {      // they owed a discard: do it for them
     autoDiscard(s, G.disc[s]); delete G.disc[s];
     if (!Object.keys(G.disc).length) G.phase = sevenPhase();
@@ -186,6 +225,7 @@ function netResume() {
   NET = {role: 'host', seat: 0, name: h.name, conns: [], bots: h.bots, code: h.code, ready: false, inGame: true, resume: true, tries: 0, msg: ''};
   G.pl.forEach((P, i) => { if (i && !P.bot) { P.gone = true; P.wait = true; } });      // the others have to reconnect
   if (G.pl.some(P => P.wait)) say('The host reloaded. Waiting for everyone to reconnect…');
+  RECON = {code: h.code, seat: 0, at: Date.now(), n: 0};      // (if someone took over meanwhile, join them: see takeOver)
   loadPeer(hostOpen);
   return true;
 }
@@ -198,7 +238,7 @@ function hostWaitOver() {      // players who didn't come back in time get a com
 function hostBegin() {
   const names = lobbyNames(), humans = 1 + NET.conns.length;
   if (!NET.ready || names.length < 2) return;
-  NET.conns.forEach((c, i) => { c.seat = i + 1; });
+  NET.conns.forEach((c, i) => { c.seat = i + 1; }); NET.seat = 0;      // (a player who took over hosting sits first in the next game)
   const cols = lobbyColors(names.length);
   newGame(names.map((n, i) => ({name: n, bot: i >= humans, c: cols[i]})), FGMODE, LEVEL, TIMER);
   if (NET.conns.length) G.boot = {s: [0].concat(NET.conns.map(c => c.seat)), until: Date.now() + BOOTMS};      // (wait for everyone's island)
@@ -245,7 +285,8 @@ function joinStart(name, code, retry, tries) {
   const fail = msg => {
     if (NET !== me || NET.inGame) return;
     clearTimeout(me.wait);
-    if (me.retry && tries + 1 < RETRIES) { NET.msg = 'Waiting for the host to come back…'; fillLobby(); setTimeout(() => { if (NET === me) joinStart(name, code, true, tries + 1); }, 3000); }
+    if (me.retry && RECON && RECON.n < RETRIES * 2 && mayHost(code)) { RECON.n++; try { me.peer.destroy(); } catch (e) {} return takeOver(me.name, code); }      // (nobody's hosting: try to host it ourselves)
+    if (me.retry && tries + 1 < RETRIES) { NET.msg = 'Waiting for the host to come back…'; fillLobby(); setTimeout(() => { if (NET === me) joinStart(me.name, code, true, tries + 1); }, 3000); }
     else if (me.retry) { try { me.peer.destroy(); } catch (e) {} NET.lost = true; NET.msg = "Couldn't reach the host. Try again, or leave."; fillLobby(); }
     else netFail(msg);
   };
@@ -256,7 +297,7 @@ function joinStart(name, code, retry, tries) {
     peer.on('open', () => {
       const c = NET.conn = peer.connect(ROOM + code, {reliable: true});
       c.on('open', () => { clearTimeout(me.wait); NET.msg = 'Connected. Waiting for the host to start…'; c.send({t: 'hello', name, c: SCFG[0].c}); fillLobby(); });
-      c.on('data', d => { if (NET === me) guestData(d); });      // events from an old connection are ignored
+      c.on('data', d => { if (NET === me) { me.heard = Date.now(); guestData(d); } });      // events from an old connection are ignored
       c.on('close', () => { if (NET === me) guestLost(); });
     });
     peer.on('error', e => {
@@ -273,16 +314,51 @@ function guestData(d) {
   if (d.t === 'lobby') { NET.names = d.names; NET.cols = Array.isArray(d.cols) ? d.cols : []; NET.hu = d.hu; FGMODE = !!d.fg; if ([0, 1, 2].includes(d.lvl)) LEVEL = d.lvl; if (TIMES.includes(d.tm)) TIMER = d.tm; fillLobby(); }
   if (d.t === 'state') {
     const fresh = !NET.inGame || (G && G.phase === 'over' && d.g.phase !== 'over');
-    G = d.g; NET.seat = d.seat; NET.inGame = true; NET.lost = false;
+    G = d.g; NET.seat = d.seat; NET.inGame = true; NET.lost = false; RECON = null;
     if (d.now) NET.skew = d.now - Date.now();
     if (fresh) { MODE = null; $('m-lobby').hidden = true; }
     render(); netMark();
   }
   if (d.t === 'bye') guestLost();      // the host is closing or reloading the page
 }
-function guestLost() {      // lost the host mid-game: keep trying to rejoin (the host may just be reloading)
+// Taking over as host (Rick, 2026-11-22: "don't disconnect the other players if the host disconnects"). When the host
+// is lost mid-game, every player keeps trying to rejoin the same room code, and the people still in the game take turns,
+// in seat order, at opening that room themselves: rank k (k-th person by seat in G, the old host counted, so it's
+// normally first) tries from HOSTWAIT * k after the loss. Whoever gets the room hosts the game from their copy of G (the
+// others are marked away for WAITMS, like after a host reload, and get their seats back by rejoining with their name);
+// a player who finds the room taken joins it as a guest. RECON = {code, seat, at: when the host was lost, n: tries}.
+let RECON = null;
+// Heartbeat: PeerJS often doesn't notice a closed host tab (the connection just goes quiet), so the host pings every
+// PINGMS and a guest in a game that hears nothing for QUIETMS counts the host as lost.
+const PINGMS = 2000, QUIETMS = 10000;
+setInterval(() => {
+  if (NET.role === 'host' && NET.conns) NET.conns.slice().forEach(c => {
+    try { if (c.open) c.send({t: 'ping'}); } catch (e) {}
+    if (c.heard && Date.now() - c.heard > QUIETMS) { try { c.close(); } catch (e) {} hostDrop(c); }      // (a guest gone quiet)
+  });
+  if (NET.role === 'guest' && NET.conn && NET.conn.open) { try { NET.conn.send({t: 'ping'}); } catch (e) {} }
+  if (NET.role === 'guest' && NET.inGame && !NET.lost && NET.heard && Date.now() - NET.heard > QUIETMS) guestLost();
+}, PINGMS);
+const HOSTWAIT = 6000;
+function mayHost(code) {
+  if (!RECON || RECON.code !== code || !G || !G.pl[RECON.seat] || G.phase === 'over') return false;
+  const people = G.pl.map((P, i) => i).filter(i => !G.pl[i].bot);
+  const k = people.indexOf(RECON.seat);
+  return k >= 0 && Date.now() - RECON.at >= k * HOSTWAIT;
+}
+function takeOver(name, code) {
+  const seat = RECON.seat, skew = NET.skew || 0;
+  try { if (NET.peer) NET.peer.destroy(); } catch (e) {}
+  if (skew) { if (G.tEnd) G.tEnd -= skew; if (G.undo && G.undo.until) G.undo.until -= skew; }      // (times were on the old host's clock)
+  NET = {role: 'host', seat, name, color: PCOL[seat], conns: [], bots: 0, code, ready: false, inGame: true, resume: true, takeover: true, tries: 0, msg: ''};
+  G.pl.forEach((P, i) => { if (i !== seat && !P.bot) { P.gone = true; P.wait = true; } });      // (everyone else has to reconnect)
+  $('m-lobby').hidden = true; render();
+  loadPeer(hostOpen);
+}
+function guestLost() {      // lost the host mid-game: keep trying to rejoin (the host may just be reloading), or take over
   if (NET.role !== 'guest' || NET.lost || !NET.inGame) return;
   NET.lost = true;
+  if (!RECON || RECON.code !== NET.code) RECON = {code: NET.code, seat: NET.seat, at: Date.now(), n: 0};
   const {name, code} = NET;
   try { NET.peer.destroy(); } catch (e) {}
   NET.msg = 'The host dropped out. Reconnecting…'; $('m-lobby').hidden = false; fillLobby();
@@ -309,6 +385,12 @@ $('l-names').onclick = e => {      // the colour picker in the lobby (only on yo
   if (NET.role === 'host') { NET.color = b.dataset.pc; sendLobby(); }
   else if (NET.conn && NET.conn.open) { NET.conn.send({t: 'color', c: b.dataset.pc}); fillLobby(); }
 };
+$('l-names').addEventListener('change', e => { if (e.target.id === 'l-myname') renameMe(e.target.value); });      // (Enter or leaving the box)
+$('l-names').addEventListener('keydown', e => {
+  if (e.target.id !== 'l-myname') return;
+  if (e.key === 'Enter') e.target.blur();
+  if (e.key === 'Escape') { e.target.value = NET.name; e.target.blur(); }
+});
 $('l-leave').onclick = leaveNet;
 $('l-cancel').onclick = () => { $('m-lobby').hidden = true; };
 $('l-rejoin').onclick = () => joinStart(NET.name, NET.code, true);

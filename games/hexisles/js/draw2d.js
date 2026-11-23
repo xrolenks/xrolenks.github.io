@@ -411,6 +411,8 @@ function harvestFx() {
   }
   if (!hs.length) return;
   HARV = {h: hs, t: Date.now() + DICEMS};
+  holdStart();      // (the new cards stay out of the hand until they land)
+  const FLYING = {};
   setTimeout(() => {
     if (!G) return;
     drawBoard();
@@ -437,16 +439,60 @@ function harvestFx() {
             {transform: 'translate(' + x0 + 'px,' + (y0 - 18) + 'px) scale(1.15)', opacity: 1, offset: .2},
             {transform: 'translate(' + mx + 'px,' + my + 'px) scale(1) rotate(' + (b.p % 2 ? 12 : -12) + 'deg)', offset: .55},
             {transform: 'translate(' + x1 + 'px,' + y1 + 'px) scale(.55)', opacity: .9}
-          ], {duration: 1000, delay: k * 110, easing: 'ease-in-out', fill: 'both'}).onfinish = () => {
+          ], {duration: 1000, delay: k * 110, easing: 'ease-in-out', fill: 'both'}).onfinish = () => land();
+          FLYING[b.p] = (FLYING[b.p] || 0) + 1;
+          let done = false;
+          const land = () => {      // the card arrives: it joins the hand (the last one for a player brings any the pictures didn't show)
+            if (done) return; done = true;
             c.remove();
             to.animate([{transform: 'scale(1)'}, {transform: 'scale(1.04)'}, {transform: 'scale(1)'}], {duration: 220});
+            holdRelease(b.p, --FLYING[b.p] > 0 ? r : null);
           };
-          setTimeout(() => c.remove(), 1300 + k * 110);      /* in case the finish event never comes (hidden tab) */
+          setTimeout(land, 1300 + k * 110);      /* in case the finish event never comes (hidden tab) */
           k++;
         }
       });
     });
+    Object.keys(HELD && HELD.p || {}).forEach(p => { if (!FLYING[p]) holdRelease(+p, null); });      // (got cards but nothing flew to them)
   }, DICEMS);
+}
+// Harvested cards wait for their flying card (Rick, 2026-11-22: they showed in the hand before the dice even landed).
+// On a fresh roll, holdStart compares each hand with the last draw (LASTRES) and keeps what was gained in HELD.p
+// {seat: {resource: n}}; the hand and the profiles' card counts show the hand minus HELD (shownRes, heldCount) until
+// holdRelease lets each card in as it lands. Everything is let in after HOLDMAX anyway.
+let HELD = null, LASTRES = null, HELDT = 0;
+const HOLDMAX = 3200;      // (after the dice land)
+function holdStart() {
+  HELD = null; clearTimeout(HELDT);
+  if (!LASTRES || LASTRES.id !== G.id) return;
+  const p = {};
+  G.pl.forEach((P, i) => KINDS().forEach(r => { const d = (P.res[r] || 0) - (LASTRES.res[i] && LASTRES.res[i][r] || 0); if (d > 0) (p[i] = p[i] || {})[r] = d; }));
+  if (!Object.keys(p).length) return;
+  HELD = {id: G.id, p};
+  HELDT = setTimeout(() => { if (HELD) { HELD = null; holdDraw(); } }, DICEMS + HOLDMAX);
+  holdDraw();      // (render drew the profiles' counts before the roll's dice started)
+}
+function holdNote() { if (G) LASTRES = {id: G.id, res: G.pl.map(P => Object.assign({}, P.res))}; }      // (end of every render)
+const heldOf = p => HELD && G && HELD.id === G.id && HELD.p[p] || null;
+const heldCount = p => { const h = heldOf(p); return h ? Object.values(h).reduce((a, b) => a + b, 0) : 0; };
+function shownRes(p) {
+  const P = G.pl[p]; if (!P) return null;
+  const h = heldOf(p); if (!h) return P.res;
+  const o = Object.assign({}, P.res);
+  for (const r in h) o[r] = Math.max(0, (o[r] || 0) - h[r]);
+  return o;
+}
+function holdRelease(p, r) {      // r: let one of that card in; null: let all of that player's in
+  const h = heldOf(p); if (!h) return;
+  if (r == null) delete HELD.p[p];
+  else { const k = h[r] ? r : Object.keys(h)[0]; if (--h[k] <= 0) delete h[k]; if (!Object.keys(h).length) delete HELD.p[p]; }
+  if (!Object.keys(HELD.p).length) HELD = null;
+  holdDraw();
+}
+function holdDraw() {      // redraw just the hand and the card counts (not the whole screen)
+  if (!G) return;
+  if (G.pl[VIEW]) $('hand').innerHTML = handHTML(shownRes(VIEW));
+  G.pl.forEach((P, i) => { const s = document.querySelector('#players .pl:nth-child(' + (i + 1) + ') .hs'); if (s) s.textContent = handSize(i) - heldCount(i); });
 }
 // --- Port trade boat ---
 // G.ship = {n: counter, e: port edge, p: trader, give, get, k: how many given}. When n changes (on every screen,
@@ -497,12 +543,20 @@ function overBar(el) {
   el.style.bottom = Math.round(W.bottom - floor + 8) + 'px';
 }
 // Undo (Rick, 2026-11-21; the rule is undoLast in rules.js): a small button at the bottom left of the map while the last build can be taken back
+// It lasts UNDOMS (Rick, 2026-11-22): a bar inside drains over the time left, and a timer hides it when time's up.
+let UNDOT = 0, UNDOSEEN = null;
 function undoBtn() {
   const b = $('undo'), on = canUndo();
+  clearTimeout(UNDOT);
   b.hidden = !on;
-  if (!on) return;
+  if (!on) { UNDOSEEN = null; return; }
   overBar(b);
-  b.textContent = '↶ Undo ' + UNDONAME[G.undo.t];
+  const left = undoLeft(), key = G.undo.until + ':' + G.undo.t;
+  UNDOT = setTimeout(undoBtn, left + 50);
+  if (UNDOSEEN === key) return;      // (same undo: keep the bar draining)
+  UNDOSEEN = key;
+  b.innerHTML = '↶ Undo ' + esc(undoName(G.undo)) + '<i class="ubar"></i>';
+  b.querySelector('.ubar').animate([{transform: 'scaleX(' + Math.min(1, left / UNDOMS) + ')'}, {transform: 'scaleX(0)'}], {duration: left, fill: 'forwards'});
 }
 const RPX = k => 20 + k * (250 / FLEETMAX), RPY = x => 30 + Math.sin(x / 22) * 5;
 function raidPath() {
@@ -921,10 +975,12 @@ function buildLabel(w, extra) {
 let TIPW = null;
 function showTip(w, x, y) {
   const T = $('tip'), R = (G && G.pl[VIEW] || {res: {}}).res;
-  if (TIPW !== w) {
-    let h = '<b>' + BNAME[w] + '</b> needs:<div>';
+  const key = w + (MAXOF[w] && G && G.pl[VIEW] ? ':' + piecesLeft(VIEW, w) : '');      // (redraw when a piece gets used)
+  if (TIPW !== key) {
+    let h ='<b>' + BNAME[w] + '</b> needs:<div>';
     for (const r in COST[w]) for (let k = 1; k <= COST[w][r]; k++) h += '<span class="tc ' + ((R[r] || 0) >= k ? 'have' : 'miss') + '" style="--a:' + COL[r][0] + ';--b:' + COL[r][1] + '">' + ico(r) + RN[r] + '</span>';
-    T.innerHTML = h + '</div>'; T.hidden = false; TIPW = w;
+    if (MAXOF[w] && G && G.pl[VIEW]) { const n = piecesLeft(VIEW, w); h += '</div><div class="tleft' + (n > 0 ? '' : ' none') + '">' + (n > 0 ? n + ' of ' + MAXOF[w] + ' left' : 'All ' + MAXOF[w] + ' ' + BNAME[w].toLowerCase() + 's built'); }      // (piece limits)
+    T.innerHTML = h + '</div>'; T.hidden = false; TIPW = key;
     // lift the cards in the hand that would pay for it
     document.querySelectorAll('#hand .rc').forEach(c => c.classList.toggle('need', +c.dataset.k <= (COST[w][c.dataset.r] || 0)));
   }

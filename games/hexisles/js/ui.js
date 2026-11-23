@@ -15,7 +15,7 @@ function load() {
     g.pl.forEach(P => fix(P.res));
     knightsToCorners(g);      // (knights stood on roads until 2026-11-19)
     (g.ports || []).forEach(o => { if (OLD[o.r]) o.r = OLD[o.r]; });
-    if (g.offer) { fix(g.offer.give); fix(g.offer.get); }
+    if (g.offer) { fix(g.offer.give); fix(g.offer.get); g.offers = [Object.assign({id: 1}, g.offer)]; g.oid = 1; delete g.offer; }      // (one offer before 2026-11-22)
     // older Forts and Guards saves (2026-11-18): one kind called "goods" (becomes Paper), then Carvings/Rugs/Silver
     const OLDG = {goods: 'paper', carving: 'paper', rug: 'cloth', silver: 'coin'};
     if (g.fg) g.pl.forEach(P => { for (const k in OLDG) if (P.res[k] != null) { P.res[OLDG[k]] = (P.res[OLDG[k]] || 0) + P.res[k]; delete P.res[k]; } GOODS.forEach(k => { P.res[k] = P.res[k] || 0; }); });
@@ -41,7 +41,7 @@ function fillRob(human) {
   $('m-rob').hidden = !(rob || give);
   if (rob) {
     $('r-title').textContent = 'Rob someone';
-    $('r-text').textContent = 'The bandit is on their land. Pick who hands you a card. They choose which one.';
+    $('r-text').textContent = 'The bandit is on their land. Pick who to rob: you take one of their cards at random.';
     $('r-opts').innerHTML = G.rob.opts.map(i => '<button data-p="' + i + '"><i class="dot" style="background:' + PCOL[i] + '"></i>' + esc(G.pl[i].name) + '<br><b>' + cards(i) + ' cards</b></button>').join('');
   } else if (give) {
     const v = G.rob.from, R = G.pl[v].res;
@@ -126,7 +126,9 @@ function fillTrade() {
   const R = G.pl[G.turn].res;
   const p = G.turn;
   if (TGIVE && R[TGIVE] < rate(p, TGIVE)) TGIVE = null;
-  $('t-give').innerHTML = KINDS().map(r => '<button data-g="' + r + '"' + (!(R[r] >= rate(p, r)) ? ' disabled' : '') + (r === TGIVE ? ' class="on"' : '') + '>' + ico(r) + RN[r] + ' (' + R[r] + ')<br><b>' + rate(p, r) + ' for 1</b></button>').join('');
+  const busy = offerOpen();      // (no bank trades while offers are on the table: only more offers)
+  if (busy) TGIVE = null;
+  $('t-give').innerHTML = KINDS().map(r => '<button data-g="' + r + '"' + (busy || !(R[r] >= rate(p, r)) ? ' disabled' : '') + (r === TGIVE ? ' class="on"' : '') + '>' + ico(r) + RN[r] + ' (' + R[r] + ')<br><b>' + rate(p, r) + ' for 1</b></button>').join('');
   const gets = KINDS();      // (Forts and Knights: any trade can get goods too; Classic: KINDS() is just the resources)
   $('t-get').innerHTML = gets.map(r => '<button data-t="' + r + '"' + (!TGIVE || r === TGIVE ? ' disabled' : '') + '>' + ico(r) + RN[r] + '</button>').join('');
   // offer to players: tap a resource to add one to that side
@@ -141,23 +143,30 @@ let OG = {}, OW = {};
 // The trade offer panel (#offers). Can this screen act for seat p? Wifi: only your own seat. Same screen: any human.
 const mySeat = p => NET.role ? NET.seat === p : !!G.pl[p] && !G.pl[p].bot;
 const cardsRow = res => RES.filter(r => res[r]).map(r => '<span class="oc" style="--a:' + COL[r][0] + ';--b:' + COL[r][1] + '" title="' + res[r] + ' ' + RN[r] + '">' + ico(r) + '<b>' + res[r] + '</b></span>').join('');
+// Several offers at once (Rick, 2026-11-22): one small card per offer (.ob, data-o = its id), newest at the top.
 function fillOffers() {
-  const box = $('offers'), o = G.offer && G.phase === 'main' ? offerFix(G.offer) : null;
-  box.hidden = !o;
-  if (!o) return;
-  const boss = mySeat(o.from);       /* this screen belongs to the player who made the offer */
-  let h = '<div class="oh"><i style="background:' + PCOL[o.from] + '"></i><b>' + esc(G.pl[o.from].name) + '</b> offers</div>';
-  h += '<div class="ot"><div>' + cardsRow(o.give) + '</div><span>for</span><div>' + cardsRow(o.get) + '</div></div>';
-  G.pl.forEach((P, i) => {
-    if (i === o.from) return;
-    const st = offerState(o, i);
-    let right = '<em class="s-' + (st || 'wait') + '">' + (st === 'yes' ? '✓ Accepted' : st === 'no' ? '✗ Declined' : st === 'x' ? 'Turned down' : 'Thinking…') + '</em>';
-    if (st === 'yes' && boss) right = '<em class="s-yes">Accepted</em><button class="ok" data-ok="' + i + '" title="Trade with ' + esc(P.name) + '"' + (has(i, o.get) ? '' : ' disabled') + '>✓</button><button class="no" data-x="' + i + '" title="Turn ' + esc(P.name) + ' down">✗</button>';
-    else if (!st && mySeat(i)) right = '<em class="s-wait q">Accept?</em><button class="ok" data-yes="' + i + '" title="Accept"' + (has(i, o.get) ? '' : ' disabled') + '>✓</button><button class="no" data-no="' + i + '" title="Decline">✗</button>';
-    h += '<div class="or"><i style="background:' + PCOL[i] + '"></i><span>' + esc(P.name) + '</span>' + right + '</div>';
+  const L = G.phase === 'main' ? OFFERS().map(offerFix) : [];
+  const box = $('offers');
+  box.hidden = !L.length;
+  if (!L.length) return;
+  const from = L[0].from, boss = mySeat(from);       /* this screen belongs to the player who made the offers */
+  let h = '<div class="oh"><i style="background:' + PCOL[from] + '"></i><b>' + esc(G.pl[from].name) + '</b> offers' + (L.length > 1 ? ' <em>(' + L.length + ')</em>' : '') + '</div>';
+  L.slice().reverse().forEach(o => {
+    h += '<div class="ob" data-o="' + o.id + '"><div class="ot"><div>' + cardsRow(o.give) + '</div><span>for</span><div>' + cardsRow(o.get) + '</div>' +
+      (boss ? '<button class="ocancel" title="Take this offer back" aria-label="Take this offer back">✕</button>' : '') + '</div>';
+    G.pl.forEach((P, i) => {
+      if (i === o.from) return;
+      const st = offerState(o, i);
+      let right = '<em class="s-' + (st || 'wait') + '">' + (st === 'yes' ? '✓ Accepted' : st === 'no' ? '✗ Declined' : st === 'x' ? 'Turned down' : 'Thinking…') + '</em>';
+      if (st === 'yes' && boss) right = '<em class="s-yes">Accepted</em><button class="ok" data-ok="' + i + '" title="Trade with ' + esc(P.name) + '"' + (has(i, o.get) && has(o.from, o.give) ? '' : ' disabled') + '>✓</button><button class="no" data-x="' + i + '" title="Turn ' + esc(P.name) + ' down">✗</button>';
+      else if (!st && mySeat(i)) right = '<em class="s-wait q">Accept?</em><button class="ok" data-yes="' + i + '" title="Accept"' + (has(i, o.get) ? '' : ' disabled') + '>✓</button><button class="no" data-no="' + i + '" title="Decline">✗</button>';
+      h += '<div class="or"><i style="background:' + PCOL[i] + '"></i><span>' + esc(P.name) + '</span>' + right + '</div>';
+    });
+    h += '</div>';
   });
-  if (boss) h += '<button class="ocancel">Take it back</button>';
+  if (boss && L.length < OFFERMAX && G.turn === from) h += '<button class="omore">+ Another offer</button>';
   box.innerHTML = h;
+  box.style.maxHeight = Math.max(120, $('view').clientHeight - 16) + 'px';      // (stay inside the map; scrolls if there are many)
 }
 
 $('board').addEventListener('click', e => {
@@ -280,12 +289,13 @@ $('o-clear').onclick = () => { OG = {}; OW = {}; fillTrade(); };
 $('o-send').onclick = () => { const a = {t: 'offer', give: OG, get: OW}; OG = {}; OW = {}; $('m-trade').hidden = true; go(a); };
 $('offers').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
-  const d = b.dataset;
-  if (d.yes != null) go({t: 'accept', p: +d.yes});
-  else if (d.no != null) go({t: 'decline', p: +d.no});
-  else if (d.ok != null) go({t: 'confirm', p: +d.ok});
-  else if (d.x != null) go({t: 'reject', p: +d.x});
-  else if (b.classList.contains('ocancel')) go({t: 'cancel'});
+  const d = b.dataset, ob = b.closest('.ob'), o = ob ? +ob.dataset.o : undefined;      // (which offer)
+  if (b.classList.contains('omore')) { $('b-trade').click(); return; }
+  if (d.yes != null) go({t: 'accept', p: +d.yes, o});
+  else if (d.no != null) go({t: 'decline', p: +d.no, o});
+  else if (d.ok != null) go({t: 'confirm', p: +d.ok, o});
+  else if (d.x != null) go({t: 'reject', p: +d.x, o});
+  else if (b.classList.contains('ocancel')) go({t: 'cancel', o});
 };
 $('log').onclick = () => { const L = $('log'); L.classList.toggle('open'); L.scrollTop = L.scrollHeight; };
 $('t-give').onclick = e => { const b = e.target.closest('button'); if (b) { TGIVE = b.dataset.g; fillTrade(); } };
