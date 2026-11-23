@@ -114,9 +114,10 @@ function tutContact(att, kind, M) {
   if (m === 'uppercut' || m === 'sweep' || m === 'airPunch' || m === 'blast') tutMark(m);
   if (m === 'hook' && n >= 3) tutMark('streetRush');
   if (m === 'roundhouse' && n >= 3) tutMark('alleySpin');
-  if (m === 'riser') tut.launched = true;
+  const launcher = m === 'riser' || m === 'updraftRiser';
+  if (launcher) tut.launched = true;
   else if (tut.launched && n >= 4) tutMark('updraft');
-  if (n <= 1 && m !== 'riser') tut.launched = false;
+  if (n <= 1 && !launcher) tut.launched = false;
   if (m === 'fieryRush') { tutMark('rush'); if (n >= 2) tutMark('cancel'); }
 }
 

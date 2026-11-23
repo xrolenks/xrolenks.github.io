@@ -1,7 +1,7 @@
 'use strict';
 // Fatal Fists - menu screens, fighter select, buttons, keys, touch
 // ===== Screens =====
-const SCREENS = ['title', 'level', 'select', 'moves', 'controls', 'online', 'pause', 'end'];
+const SCREENS = ['title', 'level', 'select', 'moves', 'controls', 'online', 'pause', 'end', 'combos'];
 function show(name) {
   G.screen = name === 'pause' ? 'game' : name;
   G.paused = name === 'pause';
@@ -13,7 +13,12 @@ function show(name) {
   if (name === 'select') buildSelect();
   if (name === 'moves') buildMoves();
   if (name === 'controls') buildControls();
-  const first = name !== 'game' && $('s-' + name).querySelector('button');
+  if (name === 'combos') buildCombos();
+  if (name === 'pause') $('pauseCombos').hidden = G.mode !== 'practice';      // combo list: practice only
+  if (name === 'title') clearDemo();
+  // difficulty cards: mark (and start on) the level used last
+  if (name === 'level') document.querySelectorAll('#s-level [data-level]').forEach(b => b.classList.toggle('cur', +b.dataset.level === G.level));
+  const first = name !== 'game' && ($('s-' + name).querySelector('.mode.cur') || $('s-' + name).querySelector('button'));
   if (first && !document.body.classList.contains('touch')) first.focus();
 }
 function showEnd() {
@@ -34,17 +39,19 @@ function togglePause() {
 
 // character select
 const roster = $('roster');
+// speed / power bars on the fighter cards: hidden for now (Rick 2026-11-22); set true to bring them back
+const SHOW_STATS = false;
 function buildSelect() {
   roster.innerHTML = '';
   FIGHTERS.forEach((d, i) => {
     const b = document.createElement('button');
     b.className = 'fcard'; b.style.setProperty('--c', d.shirt);
     b.innerHTML = '<canvas width="220" height="280"></canvas><b>' + d.name + '</b><small>' + d.title + '<br>' + d.desc + '</small>' +
-      '<div class="stat"><span>Speed</span><i><em style="width:' + Math.round(d.speed / 4.2 * 100) + '%"></em></i></div>' +
-      '<div class="stat"><span>Power</span><i><em style="width:' + Math.round(d.power / 1.25 * 100) + '%"></em></i></div>';
+      (SHOW_STATS ? '<div class="stat"><span>Speed</span><i><em style="width:' + Math.round(d.speed / 4.2 * 100) + '%"></em></i></div>' +
+      '<div class="stat"><span>Power</span><i><em style="width:' + Math.round(d.power / 1.25 * 100) + '%"></em></i></div>' : '');
     const pc = b.querySelector('canvas').getContext('2d');
     pc.setTransform(2, 0, 0, 2, 0, 0);
-    drawFighter(pc, d, P.idle, 52, 132, 1, 0.82, false);
+    drawFighter(pc, d, P.idle, 52, 136, 1, 0.74, false);      // (0.82 -> 0.74: Kade's tall hair fits, Rick 2026-11-22)
     b.onclick = () => pick(i);
     b.onmouseenter = () => { G.cursor = i; markSelect(); };
     roster.appendChild(b);
@@ -97,6 +104,8 @@ function openMoves() {
   if (movesFrom === 'pause') movesFighter = G.picks[G.mode === 'online' ? NET.side : 0];      // start on your own fighter
   if (G.mode !== '2p') movesPlayer = 0;      // 1 player and online use Player 1's keys
   show('moves');
+  // show() focuses the first button, now the top Back button; start on the fighter tabs instead, as before
+  if (!document.body.classList.contains('touch')) $('mtabs').querySelector('.cur').focus();
 }
 function buildMoves() {
   const tabs = $('mtabs');
@@ -125,23 +134,27 @@ function buildMoves() {
   const seqHow = s => s.dirs.map(x => '<b>' + ARROW[x] + '</b>').join(' ') + ' + ' + K(s.btn);
   const spHow = seqHow(sp.seq);
   $('movesKeyHint').innerHTML = '<b>→</b> means toward your rival, <b>←</b> away. ' + K('punch') + ' punch, ' + K('kick') + ' kick.';
-  const lv = m => { const l = levelOf(MOVES[m]); return ' <em class="lv ' + l + '">' + l + '</em>'; };      // high / mid / low tag
+  const lvTag = l => ' <em class="lv ' + l + '">' + l + '</em>';
+  const lv = m => lvTag(levelOf(MOVES[m]));      // high / mid / low tag
+  const spLv = lvTag(sp.level || levelOf(MOVES.special));      // a special can have its own level (Vex's Smite: overhead)
   const strs = (STRINGS[d.id] || []).map(s => row(s.name, keysOf(s.btns), s.moves.map(m => (MOVE_NAMES[m] || m) + lv(m)).join(' → '))).join('');
   $('movelist').innerHTML =
-    '<div class="wide"><h3>' + d.name + ' – ' + d.title + '</h3>' + row(sp.name, spHow, 'Energy blast, then a short wait to recharge' + lv('special')) +
+    // (descriptions condensed, Rick 2026-11-22)
+    // heading was "Name – title"; the tab already shows the name (Rick 2026-11-23)
+    '<div class="wide"><h3>Special moves</h3>' + row(sp.name, spHow, (sp.desc || 'Energy blast, short recharge') + spLv) +
     (d.extras || []).map(x => row(x.name, seqHow(x.seq), x.desc + lv(x.move))).join('') +
-    (d.fwdPunch ? row(MOVE_NAMES[d.fwdPunch], '<b>→</b> + ' + K('punch'), 'Long-range poke: about even if blocked, but if it misses you\'re open for a while' + lv(d.fwdPunch)) : '') +
-    (d.fwdKick ? row(MOVE_NAMES[d.fwdKick], '<b>→</b> + ' + K('kick'), 'Slower, longer poke, same idea. Starts a combo string' + lv(d.fwdKick)) : '') +
-    (d.backCharge ? row(MOVE_NAMES[d.backCharge], '<b>←</b> + hold ' + K('punch') + ', let go', 'Hold longer for more damage. Knocks them flying, and pushes them far away if blocked. Easy to hit while charging and after' + lv(d.backCharge)) : '') + '</div>' +
+    (d.fwdPunch ? row(MOVE_NAMES[d.fwdPunch], '<b>→</b> + ' + K('punch'), 'Long poke. Open if it misses' + lv(d.fwdPunch)) : '') +
+    (d.fwdKick ? row(MOVE_NAMES[d.fwdKick], '<b>→</b> + ' + K('kick'), 'Slower, longer poke. Starts a string' + lv(d.fwdKick)) : '') +
+    (d.backCharge ? row(MOVE_NAMES[d.backCharge], '<b>←</b> + hold ' + K('punch') + ', let go', 'Hold for more damage. Open while charging' + lv(d.backCharge)) : '') + '</div>' +
     '<div><h3>Combo strings</h3>' + (strs || '<p>None yet</p>') +
-    '<p class="hint">Press the buttons one after another. Each hit has to land (or be blocked) to keep the string going. A move marked <i>launches</i> knocks them into the air: keep hitting them before they land. Any punch or kick that lands can also cut into a special (special cancel).</p></div>' +
+    '<p class="hint">Each hit must land or be blocked to continue. <i>Launches</i> = juggle them in the air. Launching again only works in the corner, or by dashing in and catching them just before they land. Any hit can cancel into a special.</p></div>' +
     '<div><h3>Everyone</h3>' +
-    row('Jab', K('punch'), 'Level' + lv('punch')) + row('Front kick', K('kick'), 'Level' + lv('kick')) +
+    row('Jab', K('punch'), lv('punch')) + row('Front kick', K('kick'), lv('kick')) +
     row('Uppercut', '<b>↓</b> + ' + K('punch'), 'Knocks down' + lv('uppercut')) + row('Leg sweep', '<b>↓</b> + ' + K('kick'), 'Knocks down' + lv('sweep')) +
-    row('Throw', K('punch') + ' + ' + K('kick') + ' together', 'Up close, goes through blocks. Hold <b>←</b> to throw them behind you. Break a throw: ' + K('punch') + ' + ' + K('kick') + ' quickly' + lv('throw')) + row('Air punch', 'Jump + ' + K('punch'), 'Hits through a crouching block. If it connects, carry on with any string that starts with ' + K('punch') + ' as you land' + lv('airPunch')) +
+    row('Throw', K('punch') + ' + ' + K('kick'), 'Beats blocks. Hold <b>←</b> to throw behind. Break: ' + K('punch') + ' + ' + K('kick') + lv('throw')) + row('Air punch', 'Jump + ' + K('punch'), 'Lands into a ' + K('punch') + ' string' + lv('airPunch')) +
     row('Air kick', 'Jump + ' + K('kick'), 'Long reach' + lv('airKick')) +
-    row('Dash', '<b>→ →</b> or <b>← ←</b>', 'Punch or kick during it to dash in and hit') + row('Block', 'Hold ' + K('block')) +
-    '<p class="hint"><em class="lv high">high</em> block standing, or crouch to duck under it. <em class="lv mid">mid</em> block standing or crouching. <em class="lv low">low</em> only a crouching block (hold ↓ + ' + K('block') + ') stops it. <em class="lv overhead">overhead</em> comes down from above: hits you even crouching, only a standing block stops it.</p></div>';
+    row('Dash', '<b>→ →</b> or <b>← ←</b>', 'Attack during it to dash in') + row('Block', 'Hold ' + K('block')) +
+    '<p class="hint"><em class="lv high">high</em> stand-block or duck · <em class="lv mid">mid</em> block either way · <em class="lv low">low</em> crouch-block only · <em class="lv overhead">overhead</em> stand-block only</p></div>';
 }
 
 // controls: change each player's keys (saved in settings.keymap)
@@ -199,6 +212,8 @@ document.addEventListener('click', e => {
   if (g === 'moves-back') return show(movesFrom);
   if (g === 'controls') return openControls();
   if (g === 'controls-back') { binding = null; return show(ctrlFrom); }
+  if (g === 'combos') { go.blur(); return openCombos(); }      // practice combo list (combos.js)
+  if (g === 'combos-back') return show('game');
   if (G.mode === 'online' && NET.role) {      // online: some buttons act for both players
     if (g === 'resume') return NET.role === 'guest' ? netSend({t: 'pause', v: false}) : show('game');
     if (g === 'restart') return NET.role === 'guest' ? netSend({t: 'rematch'}) : netStart();
@@ -250,6 +265,7 @@ addEventListener('keydown', e => {
     if (dir) { e.preventDefault(); $('mtabs').children[(movesFighter + dir + n) % n].click(); return; }
     if (e.code === 'Escape') { e.preventDefault(); return show(movesFrom); }
   }
+  if (G.screen === 'combos' && e.code === 'Escape') { e.preventDefault(); return show('game'); }
   menuKeys(e);
 });
 function menuKeys(e) {
@@ -258,8 +274,9 @@ function menuKeys(e) {
   if (!scr) return;
   const btns = [...scr.querySelectorAll('button')].filter(b => !b.hidden);      // skip hidden ones (dummy button outside practice)
   const i = btns.indexOf(document.activeElement);
-  if (['KeyS', 'ArrowDown'].includes(e.code)) { e.preventDefault(); btns[(i + 1) % btns.length].focus(); SFX.move(); }
-  else if (['KeyW', 'ArrowUp'].includes(e.code)) { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); SFX.move(); }
+  // (left / right too, since menus have buttons side by side now)
+  if (['KeyS', 'ArrowDown', 'KeyD', 'ArrowRight'].includes(e.code)) { e.preventDefault(); btns[(i + 1) % btns.length].focus(); SFX.move(); }
+  else if (['KeyW', 'ArrowUp', 'KeyA', 'ArrowLeft'].includes(e.code)) { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); SFX.move(); }
   else if (e.code === 'KeyJ' && i >= 0) { e.preventDefault(); btns[i].click(); }
   else if (e.code === 'Escape') {
     const back = scr.querySelector('[data-go="title"]');

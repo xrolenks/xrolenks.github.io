@@ -20,6 +20,9 @@ function aiPlan(me, foe, dist, F, B, L) {
   const think = L.react + rnd(L.react);
   // rival launched into the air: Normal / Hard keep hitting them (punches, then an uppercut)
   if (foe.state === 'juggle' && G.level > 0 && dist < 170) {
+    // an extend-juggle special (Vex's Sky Bolt) pops them back up
+    const ext = (me.def.extras || []).find(x => MOVES[x.move].extend);
+    if (ext && dist < 110 && r < 0.35) return seqMotion(ext.seq, F, B, 6);
     if (r < 0.5) return [{h: {[F]: dist > 60}, d: 3}, {p: 'punch', d: 12}];
     return [{h: {[F]: dist > 60}, d: 3}, {h: {down: true}, p: 'punch', d: 14}];
   }
@@ -29,8 +32,11 @@ function aiPlan(me, foe, dist, F, B, L) {
     return [{h: {[F]: true}, d: 20 + rnd(25)}];
   }
   if (dist > 110) {
-    // extra specials (Kade's Fiery Rush / Blaze Wheel) from a short way off
-    const exs = me.def.extras || [], ex = exs[rnd(exs.length)];      // one of this fighter's extra specials
+    // Vex (zoner) also calls down Smite from mid range, not only from far away (else his Ground Pulse crowds it out)
+    if (me.def.special.type === 'smite' && me.cd <= 0 && Math.random() < L.spec * 0.5) return blastMotion(me, F, B, think);
+    // extra specials (Kade's Fiery Rush / Blaze Wheel, Vex's Ground Pulse) from a short way off
+    // (not close-range ones like Vex's Shockwave, which would just miss from here)
+    const exs = (me.def.extras || []).filter(x => !MOVES[x.move].close && !MOVES[x.move].antiAir), ex = exs[rnd(exs.length)];      // one of this fighter's extra specials
     if (ex && G.level > 0 && dist < 330 && Math.random() < 0.18) return seqMotion(ex.seq, F, B, think);
     // charge move (Kade's Furnace Fist): back + hold punch for a while, then let go
     if (me.def.backCharge && G.level > 0 && dist < 170 && Math.random() < 0.2)
@@ -50,6 +56,9 @@ function aiPlan(me, foe, dist, F, B, L) {
     if (r < 0.9) return [{h: {[B]: true}, d: 12 + rnd(12)}];
     return [{d: think}];
   }
+  // rival right in our face: a close-range "get off me" special (Vex's Shockwave) pushes them back out
+  const away = (me.def.extras || []).find(x => MOVES[x.move].close);
+  if (away && G.level > 0 && dist < 100 && Math.random() < (G.level === 2 ? 0.3 : 0.18)) return seqMotion(away.seq, F, B, think);
   const crouching = foe.state === 'crouch' || foe.state === 'cblock';
   // rival standing and blocking: a sweep (low) gets under their guard
   if (foe.state === 'block' && r < L.aggr) return [{h: {down: true}, p: 'kick', d: 50}, {d: think}];
@@ -121,10 +130,23 @@ function aiThink(me, foe) {
         : [{h: {block: true, down: lv === 'low'}, d: 16 + rnd(10)}];
       A.react = true;
     }
-    const pr = G.projectiles.find(p => p.owner === foe && Math.sign(me.x - p.x) === Math.sign(p.vx) && Math.abs(me.x - p.x) < 200);
-    if (!A.react && pr && Math.random() < L.dodge * 0.12) {
-      A.q = Math.random() < 0.6 ? [{h: {down: true}, d: 30}] : [{h: {up: true, [F]: true}, d: 3}, {d: 20}];
+    // Vex's Smite marked under us (fight.js): stand-block it (overhead, so not crouching) or back-dash out of the spot
+    const sm = G.projectiles.find(p => p.owner === foe && p.s.type === 'smite' && p.t < SMITE_WARN && Math.abs(me.x - p.x) < SMITE_HALF + 40);
+    if (!A.react && sm && Math.random() < L.dodge * 0.3) {
+      A.q = Math.random() < 0.5 ? [{h: {block: true}, d: SMITE_WARN - sm.t + SMITE_ACTIVE + 4}] : [{p: B, d: 3}, {p: B, d: 18}];
       A.react = true;
+    }
+    const pr = G.projectiles.find(p => p.owner === foe && p.s.type !== 'smite' && Math.sign(me.x - p.x) === Math.sign(p.vx) && Math.abs(me.x - p.x) < 200);
+    if (!A.react && pr && Math.random() < L.dodge * 0.12) {
+      // Vex's Ground Pulse is low: crouch-block it or jump over it (just ducking doesn't help)
+      if (pr.s.type === 'pulse') A.q = Math.random() < 0.6 ? [{h: {block: true, down: true}, d: 30}] : [{h: {up: true}, d: 3}, {d: 30}];
+      else A.q = Math.random() < 0.6 ? [{h: {down: true}, d: 30}] : [{h: {up: true, [F]: true}, d: 3}, {d: 20}];
+      A.react = true;
+    }
+    // an anti-air special (Vex's Sky Bolt): start the motion a little early, it takes a few frames to type
+    const ax = (me.def.extras || []).find(x => MOVES[x.move].antiAir);
+    if (!A.react && ax && !foe.onGround && foe.state === 'jump' && foe.vy > -6 && dist < 170 && Math.random() < L.anti * 0.2) {
+      A.q = seqMotion(ax.seq, F, B, 10); A.react = true;
     }
     if (!A.react && !foe.onGround && foe.state === 'jump' && foe.vy > -2 && dist < 120 && Math.random() < L.anti * 0.15) {
       A.q = [{h: {down: true}, p: 'punch', d: 22}]; A.react = true;

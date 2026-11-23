@@ -112,6 +112,19 @@ function drawHead(c, d, h, white) {
     c.beginPath(); c.moveTo(x - 15, y - 1);
     [[-20, -12], [-10, -12], [-10, -24], [-2, -15], [4, -25], [8, -14], [16, -16], [14, -6]].forEach(([px, py]) => c.lineTo(x + px, y + py));
     c.closePath(); c.fill();
+  } else if (d.hair === 'blaze') {
+    // Kade (Rick 2026-11-22): tall spikes swept back, bright colour fading to the tips, dark outline so it stands out
+    c.beginPath(); c.moveTo(x - 14, y + 1);
+    [[-27, -6], [-17, -11], [-27, -22], [-11, -18], [-14, -34], [-2, -20], [3, -37], [8, -19], [17, -29], [14, -14],
+      [21, -13], [14, -5]].forEach(([px, py]) => c.lineTo(x + px, y + py));
+    c.closePath();
+    c.strokeStyle = '#0a0405'; c.lineWidth = 4.5; c.stroke();
+    if (!white) {
+      const g = c.createLinearGradient(x, y - 4, x - 6, y - 36);
+      g.addColorStop(0, d.hairCol); g.addColorStop(1, d.hairTip || d.hairCol);
+      c.fillStyle = g;
+    }
+    c.fill();
   } else if (d.hair === 'long' || d.hair === 'tail') {
     c.beginPath(); c.arc(x, y, 15, Math.PI * 0.95, Math.PI * 2.02); c.closePath(); c.fill();
   } else if (d.hair === 'bald') {
@@ -147,6 +160,7 @@ function drawFighter(c, d, pose, x, y, face, sc, white) {
   };
   const leg = (hi, kn, ft, back) => {
     seg(c, [hi, kn, ft], 14, back ? dark('pants') : col('pants'));
+    if (d.pantsFlames && !white) drawPantsFlames(c, hi, kn, ft, back);
     seg(c, [ft, [ft[0] + 9, ft[1] + 1]], 8, white ? W_ : '#1a1210');
   };
   arm(shB, eB, hB, true);
@@ -162,7 +176,55 @@ function drawFighter(c, d, pose, x, y, face, sc, white) {
   drawHead(c, d, pose.head, white);
   arm(shF, eF, hF, false);
   if (pose.glow > 0 && d.throwFx) { drawHandGlow(c, hF, d.throwFx, pose.glow); drawHandGlow(c, hB, d.throwFx, pose.glow); }
+  if (pose.zap > 0 && !white) { drawHandSparks(c, hF, d.special.color, pose.zap); drawHandSparks(c, hB, d.special.color, pose.zap * 0.6); }      // Smite
+  if (pose.upBolt > 0 && !white) drawSkyBolts(c, hF, hB, d.special.color, pose.upBolt);      // Sky Bolt
+  // Shockwave: the ball sits just in front of the two fists; the burst comes out of the same spot
+  if ((pose.ball > 0 || pose.shock > 0) && !white) {
+    const o = [(hF[0] + hB[0]) / 2 + 10, (hF[1] + hB[1]) / 2];
+    if (pose.ball > 0) drawShockBall(c, o, d.special.color, pose.ball);
+    if (pose.shock > 0) drawShockBurst(c, o, d.special.color, pose.shock);
+  }
   if (pose.heat > 0) { drawFistFlame(c, hF, pose.heat, pose.flameLean || 0); drawFistHeat(c, hF, pose.heat); }      // only the punching fist
+  if (pose.heat > 0 && pose.heatBoth) { drawFistFlame(c, hB, pose.heat, pose.flameLean || 0); drawFistHeat(c, hB, pose.heat); }      // Flaming Flurry: both
+  c.restore();
+}
+// Hot rod flames printed on the pants (Kade, Rick 2026-11-22: "longer, more branching, like a hot rod pattern").
+// Long wavy tongues of different lengths rise from the ankle, the longest past the knee up the thigh, with smaller
+// licks branching off their sides. Flat orange with a yellow inside, no outline, so it reads as a print on the pants. Coordinates: a = distance up the leg from the ankle (foot -> knee -> hip), s = sideways across the leg,
+// kept inside the leg's width. back = the far leg, drawn darker like the rest of it.
+// Simplified the same day (Rick: "too detailed, not like a design on pants"): fewer, bolder tongues, gentle curves,
+// two flat colours.
+const PANTS_FLAMES = [      // a0 = where it starts up the leg, h = length (both x leg length), s0 = across, sway = S-bend, w = base half-width
+  {a0: 0, h: 0.46, s0: -3.4, sway: 1.6, w: 3.6}, {a0: 0, h: 0.74, s0: 0.4, sway: -2, w: 4.2},
+  {a0: 0, h: 0.34, s0: 4.2, sway: 1.2, w: 3},
+  // one simple branch off the long middle tongue
+  {a0: 0.36, h: 0.22, s0: 2.2, sway: 2.2, w: 2.2}];
+function drawPantsFlames(c, hi, kn, ft, back) {
+  const L1 = Math.hypot(kn[0] - ft[0], kn[1] - ft[1]) || 1, L2 = Math.hypot(hi[0] - kn[0], hi[1] - kn[1]) || 1, LT = L1 + L2;
+  const at = (a, s) => {      // a point on the leg: a up from the ankle, s across (clamped inside the leg)
+    const [p, q, k] = a <= L1 ? [ft, kn, a / L1] : [kn, hi, Math.min(1, (a - L1) / L2)];
+    const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1, sc = Math.max(-6.2, Math.min(6.2, s));
+    return [p[0] + dx * k - dy / l * sc, p[1] + dy * k + dx / l * sc];
+  };
+  const shape = (hk, wk) => {      // all tongues as one path; hk / wk shrink length / width for the inner layers
+    c.beginPath();
+    const b0 = at(0, -6.2), b1 = at(0, 6.2), b2 = at(5, 6.2), b3 = at(5, -6.2);      // solid band at the ankle
+    // (same winding direction as the tongues below, so overlaps fill instead of leaving holes)
+    c.moveTo(b0[0], b0[1]); c.lineTo(b3[0], b3[1]); c.lineTo(b2[0], b2[1]); c.lineTo(b1[0], b1[1]); c.closePath();
+    for (const t of PANTS_FLAMES) {
+      const a0 = t.a0 * LT, h = t.h * LT * hk, N = 12, left = [], right = [];
+      for (let i = 0; i <= N; i++) {
+        const u = i / N, a = a0 + h * u, mid = t.s0 + t.sway * Math.sin(u * Math.PI) * u, w = t.w * wk * Math.pow(1 - u, 0.8);
+        left.push(at(a, mid - w)); right.push(at(a, mid + w));
+      }
+      const pts = left.concat(right.reverse());
+      c.moveTo(pts[0][0], pts[0][1]); for (const p of pts) c.lineTo(p[0], p[1]); c.closePath();
+    }
+  };
+  c.save();
+  c.lineJoin = 'round';
+  shape(1, 1); c.fillStyle = back ? '#b04a12' : '#ff7a18'; c.fill();      // flat orange (no outline: reads as a print)
+  shape(0.5, 0.45); c.fillStyle = back ? '#b8962a' : '#ffd23a'; c.fill();      // flat yellow inside
   c.restore();
 }
 // Heating fists (charge moves): k 0..1. Dark red embers at first, then orange, then a white-hot core and a big glow.
@@ -340,6 +402,7 @@ function poseFor(f) {
       return p;
     }
     case 'attack': {
+      if (f.move === 'special' && f.def.special.type === 'smite') return smitePose(t);
       const M = MOVES[f.move];
       const base = M.basePose ? P[M.basePose] : M.air ? P.jump : (f.move === 'sweep' || f.move === 'uppercut') ? P.crouch : P.idle;
       if (M.spin) return spinPose(f, M, base);
@@ -364,6 +427,23 @@ function poseFor(f) {
         const end = M.startup + M.active;
         p.fire = t < end ? clamp01((t - M.startup + 5) / 5) : clamp01(1 - (t - end) / 10);
       }
+      // electric hands (Vex's Ground Pulse): sparks build while the fist goes up, flare as it hits the floor, then fade
+      if (M.zap) { const end = M.startup + M.active; p.zap = t < M.startup ? t / M.startup : t < end + 4 ? 1.6 : 1.6 * clamp01(1 - (t - end - 4) / 8); }
+      // Flaming Flurry: alternate fists every 2 frames while active; both fists burn (flames trail back)
+      if (M.flurry && t >= M.startup && t < M.startup + M.active) {
+        const alt = Math.floor((t - M.startup) / 2) % 2;
+        const sx = p.sx; p = clonePose(alt ? P.flurryB : P.flurryA); if (sx != null) p.sx = sx;
+      }
+      if (M.fistFire) { const end = M.startup + M.active; p.heat = t < end ? 0.55 * clamp01(t / 3) : 0.55 * clamp01(1 - (t - end) / 8); p.heatBoth = true; p.flameLean = -0.8; }
+      // Sky Bolt: lightning shoots up out of the raised hands while active, fading in the first frames of recovery
+      if (M.bolts) { const s = M.startup; p.upBolt = t >= s - 1 && t < s + M.active + 6 ? 1 - Math.max(0, t - s - M.active) / 6 : 0; }
+      // Shockwave: an electric ball grows between the fists during startup, then bursts forward from the hands
+      if (M.shock) {
+        const end = M.startup + M.active;
+        p.ball = t < M.startup ? clamp01(t / M.startup) : 0;
+        p.shock = t >= M.startup && t < end + 6 ? (t - M.startup + 1) / (M.active + 6) : 0;
+        if (p.zap) p.zap *= 0.5;      // the ball is the main show: softer sparks on the hands
+      }
       return p;
     }
   }
@@ -372,6 +452,9 @@ function poseFor(f) {
 
 // ===== Drawing: blasts, particles, fire =====
 function drawProjectile(c, p) {
+  if (p.s.type === 'smite') return drawSmite(c, p);
+  if (p.s.type === 'pulse') return drawPulse(c, p);
+  if (p.s.type === 'trap') return drawTrap(c, p);
   const s = p.s, col = s.color;
   c.save(); c.translate(p.x, p.y);
   const glow = c.createRadialGradient(0, 0, 2, 0, 0, p.r * 2.4);
@@ -405,6 +488,232 @@ function drawProjectile(c, p) {
     c.scale(0.55 + Math.abs(Math.sin(p.t * 0.25)) * 0.45, 1);
     c.strokeStyle = col; c.lineWidth = 6; c.beginPath(); c.arc(0, 0, p.r, 0, Math.PI * 2); c.stroke();
     c.strokeStyle = '#ffffff'; c.lineWidth = 2; c.beginPath(); c.arc(0, 0, p.r - 5, 0, Math.PI * 2); c.stroke();
+  }
+  c.restore();
+}
+// Vex's Static Orb (Rick 2026-11-23): a crackling orb gently bobbing in place (blinks in its last 45 frames so you
+// can see it's about to fade). Once triggered (p.boom), a bright flash and jagged rings bursting out of it.
+function drawTrap(c, p) {
+  const col = p.s.color, x = p.x, y = p.y + Math.sin(p.t * 0.12) * 3;
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  if (p.boom) {
+    const k = p.boom / TRAP_BOOM;
+    c.globalAlpha = Math.max(0, 1 - k * 1.6); c.fillStyle = '#ffffff';
+    c.beginPath(); c.arc(x, y, 18 + 30 * k, 0, Math.PI * 2); c.fill();
+    for (let j = 0; j < 2; j++) {
+      const r = 20 + k * (70 + j * 25);
+      c.globalAlpha = Math.max(0, 1 - k); c.strokeStyle = j ? col : '#ffffff'; c.lineWidth = j ? 4 : 2.5;
+      c.beginPath();
+      for (let s = 0; s <= 16; s++) { const a = s / 16 * Math.PI * 2, rr = r + (Math.random() - 0.5) * 10; s ? c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr) : c.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+      c.stroke();
+    }
+    c.restore(); return;
+  }
+  const left = p.s.life - p.t;
+  const blink = left < 45 && Math.floor(p.t / 4) % 2 === 0 ? 0.35 : 1;
+  const grow = Math.min(1, p.t / 8), r = TRAP_R * grow;
+  c.globalAlpha = blink;
+  const g = c.createRadialGradient(x, y, 2, x, y, r * 2.2);
+  g.addColorStop(0, 'rgba(255,255,235,0.9)'); g.addColorStop(0.4, 'rgba(199,255,90,0.55)'); g.addColorStop(1, 'rgba(199,255,90,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, r * 2.2, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(x, y, r * (0.9 + 0.08 * Math.sin(p.t * 0.5)), 0, Math.PI * 2); c.stroke();
+  c.fillStyle = '#ffffff'; c.beginPath(); c.arc(x, y, r * 0.35, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = '#efffc8'; c.lineWidth = 1.5;
+  for (let i = 0; i < 3; i++) {      // arcs crawling round it
+    const a = Math.random() * Math.PI * 2, b = a + 0.5 + Math.random() * 0.8;
+    c.beginPath(); c.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    c.lineTo(x + Math.cos((a + b) / 2) * r * 1.4, y + Math.sin((a + b) / 2) * r * 1.4);
+    c.lineTo(x + Math.cos(b) * r, y + Math.sin(b) * r); c.stroke();
+  }
+  c.restore();
+}
+// Vex's Ground Pulse (Rick 2026-11-23): a crackling wave hugging the floor. A glow on the ground, a fading electric
+// trail behind it, and a low wall of jagged little arcs (about PULSE_H tall) at the front, redrawn every frame.
+function drawPulse(c, p) {
+  const col = p.s.color, dir = Math.sign(p.vx) || 1, gy = GROUND, x = p.x;
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  // glow on the floor (stretched backwards along the trail)
+  const g = c.createRadialGradient(x, gy, 2, x, gy, 60);
+  g.addColorStop(0, 'rgba(240,255,200,0.7)'); g.addColorStop(0.45, 'rgba(199,255,90,0.35)'); g.addColorStop(1, 'rgba(199,255,90,0)');
+  c.fillStyle = g; c.beginPath(); c.ellipse(x - dir * 14, gy, 64, 16, 0, 0, Math.PI * 2); c.fill();
+  // trail: a jagged line along the floor behind it, fading out
+  const trail = Math.min(140, p.t * Math.abs(p.vx));
+  for (let i = 0; i < 2; i++) {
+    c.globalAlpha = i ? 0.9 : 0.35; c.strokeStyle = i ? '#f4ffd6' : col; c.lineWidth = i ? 1.5 : 5;
+    c.beginPath(); c.moveTo(x, gy - 3);
+    for (let s = 10; s <= trail; s += 10) c.lineTo(x - dir * s, gy - 2 - Math.random() * 6 * (1 - s / trail));
+    c.stroke();
+  }
+  // the wall of arcs at the front
+  c.strokeStyle = col; c.lineWidth = 2.5; c.globalAlpha = 0.95;
+  for (let i = 0; i < 5; i++) {
+    const bx = x - dir * (i * 7) + (Math.random() - 0.5) * 6, h = (PULSE_H - i * 5) * (0.7 + Math.random() * 0.4);
+    c.strokeStyle = Math.random() < 0.3 ? '#ffffff' : col;
+    c.beginPath(); c.moveTo(bx, gy);
+    for (let k = 1; k <= 3; k++) c.lineTo(bx + (Math.random() - 0.5) * 12, gy - h * k / 3);
+    c.stroke();
+  }
+  c.restore();
+}
+// Vex casting Smite (Rick 2026-11-23), timed off his own move clock t: raise the hand to the sky during startup,
+// hold it up (trembling, sparks building) through the warning, slam it down on the frame the bolt lands
+// (t = startup + SMITE_WARN), then back to standing. pose.zap = how strong the sparks round his hands are.
+function smitePose(t) {
+  // the bolt lands on Vex's frame S + SMITE_WARN - 1 (measured); the slam starts SLAM frames before so the hand
+  // reaches the bottom on that same frame
+  const M = MOVES.special, S = M.startup, HIT = S + SMITE_WARN - 1, SLAM = 3, L = HIT - SLAM, end = S + M.active + M.recovery;
+  let p, zap;
+  if (t < S) { p = lerpPose(P.idle, P.smiteUp, ease(t / S)); zap = t / S; }
+  else if (t < L) {
+    p = clonePose(P.smiteUp); zap = 1;
+    const sh = 0.8 + 1.6 * (t - S) / (L - S);      // tremble harder as the strike gets close
+    p.hF[0] += Math.sin(G.frame * 2.3) * sh; p.hF[1] += Math.cos(G.frame * 1.9) * sh;
+  } else if (t < HIT) { const k = (t - L) / SLAM; p = lerpPose(P.smiteUp, P.smiteDown, k * k); zap = 1.2; }      // speeds up
+  else if (t < HIT + 3) { p = clonePose(P.smiteDown); zap = 1.6; }      // held a moment as the bolt hits, sparks flare
+  else { p = lerpPose(P.smiteDown, P.idle, ease(clamp01((t - HIT - 3) / (end - HIT - 3)))); zap = 1.6 * clamp01(1 - (t - HIT - 3) / 4); }
+  p.zap = zap;
+  return p;
+}
+// Vex's Sky Bolt (Rick 2026-11-23): three jagged bolts shooting up out of his raised hands (fanning out a little, up
+// past the top of the hit box), with small forks, redrawn every frame so they flicker; k fades them out.
+function drawSkyBolts(c, hF, hB, col, k) {
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  const o = [(hF[0] + hB[0]) / 2, Math.min(hF[1], hB[1]) - 4];
+  const g = c.createRadialGradient(o[0], o[1], 2, o[0], o[1], 40);
+  g.addColorStop(0, 'rgba(255,255,235,' + 0.8 * k + ')'); g.addColorStop(1, 'rgba(199,255,90,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(o[0], o[1], 40, 0, Math.PI * 2); c.fill();
+  const bolt = (dx, w, colr, a) => {
+    c.globalAlpha = a * k; c.strokeStyle = colr; c.lineWidth = w;
+    c.beginPath(); c.moveTo(o[0], o[1]);
+    const top = -270, n = 7;
+    for (let i = 1; i <= n; i++) { const s = i / n; c.lineTo(o[0] + dx * s + (Math.random() - 0.5) * 16, o[1] + (top - o[1]) * s); }
+    c.stroke();
+  };
+  for (const dx of [-26, 4, 30]) { bolt(dx, 9, col, 0.3); bolt(dx, 4, col, 0.85); bolt(dx, 1.6, '#ffffff', 1); }
+  c.globalAlpha = 0.7 * k; c.strokeStyle = col; c.lineWidth = 2;      // a couple of forks
+  for (let i = 0; i < 2; i++) {
+    const y = o[1] - 30 - Math.random() * 60, sd = i ? 1 : -1;
+    c.beginPath(); c.moveTo(o[0] + sd * 8, y); c.lineTo(o[0] + sd * (18 + Math.random() * 10), y - 12); c.lineTo(o[0] + sd * (30 + Math.random() * 12), y - 4); c.stroke();
+  }
+  c.restore();
+}
+// Vex's Shockwave (Rick 2026-11-23). Ball: a glowing electric orb between his fists, growing with k (0..1) and
+// crackling. Burst: crescent waves of jagged lightning rolling forward out of the ball, fading as they go (k 0..1).
+// Both drawn in the fighter's own space (+x = toward the rival).
+function drawShockBall(c, o, col, k) {
+  const r = 4 + 12 * k;
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  const g = c.createRadialGradient(o[0], o[1], 1, o[0], o[1], r * 2.2);
+  g.addColorStop(0, 'rgba(255,255,240,0.95)'); g.addColorStop(0.35, col); g.addColorStop(1, 'rgba(199,255,90,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(o[0], o[1], r * 2.2, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#ffffff'; c.beginPath(); c.arc(o[0], o[1], r * 0.45, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = col; c.lineWidth = 1.6;
+  for (let i = 0; i < 2 + Math.round(3 * k); i++) {      // little arcs crawling over the ball
+    const a = Math.random() * Math.PI * 2, b = a + 0.6 + Math.random() * 0.8;
+    c.beginPath(); c.moveTo(o[0] + Math.cos(a) * r, o[1] + Math.sin(a) * r);
+    c.lineTo(o[0] + Math.cos((a + b) / 2) * r * 1.35, o[1] + Math.sin((a + b) / 2) * r * 1.35);
+    c.lineTo(o[0] + Math.cos(b) * r, o[1] + Math.sin(b) * r); c.stroke();
+  }
+  c.restore();
+}
+function drawShockBurst(c, o, col, k) {
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  if (k < 0.35) {      // flash where the ball was
+    c.globalAlpha = 1 - k / 0.35; c.fillStyle = '#ffffff';
+    c.beginPath(); c.arc(o[0], o[1], 14 + 20 * k, 0, Math.PI * 2); c.fill();
+  }
+  for (let j = 0; j < 3; j++) {      // three waves, the later ones a little behind
+    const r = 14 + k * 112 - j * 14;      // (reaches about as far as the hit box)
+    if (r < 8) continue;
+    c.globalAlpha = Math.max(0, (1 - k) * (1 - j * 0.25));
+    c.strokeStyle = j === 0 ? '#ffffff' : col; c.lineWidth = j === 0 ? 3 : 4;
+    c.beginPath();
+    for (let s = 0; s <= 10; s++) {
+      const a = -0.95 + 1.9 * s / 10, rr = r + (Math.random() - 0.5) * 8;
+      const x = o[0] + Math.cos(a) * rr, y = o[1] + Math.sin(a) * rr * 1.15;
+      s ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.stroke();
+  }
+  c.restore();
+}
+// sparks round a hand (Smite): a small glow and a few jagged little arcs, redrawn at random each frame so they crackle
+function drawHandSparks(c, h, col, amt) {
+  if (amt <= 0) return;
+  drawHandGlow(c, h, col, Math.min(1, amt * 0.75));
+  c.save();
+  c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  const n = Math.round(2 + 3 * amt);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r0 = 6 + Math.random() * 4, r1 = r0 + 8 + 10 * amt * Math.random();
+    c.strokeStyle = Math.random() < 0.35 ? '#ffffff' : col; c.lineWidth = 1.5 + Math.random();
+    c.globalAlpha = Math.min(1, 0.6 + 0.4 * amt);
+    c.beginPath(); c.moveTo(h[0] + Math.cos(a) * r0, h[1] + Math.sin(a) * r0);
+    const mid = a + (Math.random() - 0.5) * 0.9, rm = (r0 + r1) / 2;
+    c.lineTo(h[0] + Math.cos(mid) * rm, h[1] + Math.sin(mid) * rm);
+    c.lineTo(h[0] + Math.cos(a) * r1, h[1] + Math.sin(a) * r1); c.stroke();
+  }
+  c.restore();
+}
+// Vex's Smite (Rick 2026-11-22). Warning (t < SMITE_WARN): a storm cloud gathers at the top, a faint column of light
+// and a pulsing, crackling ring mark the spot on the floor. Strike: a jagged flickering bolt with forks and a ground
+// flash, fading out by SMITE_END.
+function drawSmite(c, p) {
+  const col = p.s.color, x = p.x, gy = GROUND;
+  const zig = (x0, y0, x1, y1, n, amp) => {      // a jagged line from (x0, y0) to (x1, y1)
+    c.beginPath(); c.moveTo(x0, y0);
+    for (let i = 1; i < n; i++) { const k = i / n; c.lineTo(x0 + (x1 - x0) * k + (Math.random() - 0.5) * amp * 2, y0 + (y1 - y0) * k); }
+    c.lineTo(x1, y1);
+  };
+  c.save();
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  // storm cloud (both phases, fading out at the end)
+  const fade = p.t < SMITE_WARN ? Math.min(1, p.t / 8) : Math.max(0, 1 - (p.t - SMITE_WARN) / (SMITE_END - SMITE_WARN));
+  c.globalAlpha = 0.85 * fade;
+  c.fillStyle = '#2a1840';
+  // (below the health bars, which cover the top ~80 px)
+  [[-46, 104, 34, 16], [-14, 96, 38, 20], [24, 104, 36, 16], [0, 112, 52, 14]].forEach(([dx, cy, rx, ry]) => {
+    c.beginPath(); c.ellipse(x + dx, cy, rx, ry, 0, 0, Math.PI * 2); c.fill();
+  });
+  c.globalAlpha = 1;
+  if (p.t < SMITE_WARN) {
+    const k = p.t / SMITE_WARN, pulse = 0.6 + 0.4 * Math.sin(p.t * 0.9);
+    c.globalCompositeOperation = 'lighter';
+    // faint column of light where it will strike
+    c.fillStyle = 'rgba(199,255,90,' + (0.05 + 0.12 * k) + ')';
+    c.fillRect(x - SMITE_HALF, 118, SMITE_HALF * 2, gy - 118);
+    // ring on the floor, getting brighter
+    c.strokeStyle = col; c.globalAlpha = (0.35 + 0.65 * k) * pulse; c.lineWidth = 3;
+    c.beginPath(); c.ellipse(x, gy + 2, SMITE_HALF + 8, 9, 0, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.25 + 0.4 * k; c.fillStyle = col;
+    c.beginPath(); c.ellipse(x, gy + 2, (SMITE_HALF + 8) * k, 9 * k, 0, 0, Math.PI * 2); c.fill();
+    // crackles round the ring, and flickers in the cloud
+    c.globalAlpha = 0.9; c.lineWidth = 2; c.strokeStyle = '#efffc8';
+    for (let i = 0; i < 2 + Math.round(3 * k); i++) {
+      const a = Math.random() * Math.PI * 2, rx = x + Math.cos(a) * (SMITE_HALF + 8), ry = gy + 2 + Math.sin(a) * 9;
+      zig(rx, ry, rx + (Math.random() - 0.5) * 16, ry - 8 - Math.random() * 14, 3, 4); c.stroke();
+    }
+    if (Math.random() < 0.3 + 0.5 * k) { c.strokeStyle = col; zig(x + (Math.random() - 0.5) * 60, 104, x + (Math.random() - 0.5) * 60, 122, 3, 6); c.stroke(); }
+  } else if (p.t < SMITE_END) {
+    const k = Math.max(0, 1 - (p.t - SMITE_WARN) / (SMITE_END - SMITE_WARN));      // 1 at the strike, fading to 0
+    c.globalCompositeOperation = 'lighter';
+    // ground flash
+    const g = c.createRadialGradient(x, gy, 2, x, gy, 90);
+    g.addColorStop(0, 'rgba(255,255,230,' + 0.8 * k + ')'); g.addColorStop(0.4, 'rgba(199,255,90,' + 0.45 * k + ')'); g.addColorStop(1, 'rgba(199,255,90,0)');
+    c.fillStyle = g; c.beginPath(); c.ellipse(x, gy, 90, 34, 0, 0, Math.PI * 2); c.fill();
+    // the bolt: wide glow, coloured body, white core (redrawn jagged every frame so it flickers), plus two forks
+    const bolt = (w, colr, a) => { c.globalAlpha = a; c.strokeStyle = colr; c.lineWidth = w; zig(x + (Math.random() - 0.5) * 10, 110, x, gy, 10, 12); c.stroke(); };
+    bolt(22 * k + 4, col, 0.25 * k); bolt(8, col, 0.85 * k); bolt(3, '#ffffff', k);
+    c.globalAlpha = 0.7 * k; c.strokeStyle = col; c.lineWidth = 3;
+    for (let i = 0; i < 2; i++) {
+      const fy = 160 + Math.random() * 170, sd = i ? 1 : -1;
+      zig(x, fy, x + sd * (30 + Math.random() * 30), fy + 40 + Math.random() * 40, 4, 6); c.stroke();
+    }
   }
   c.restore();
 }

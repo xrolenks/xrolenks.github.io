@@ -163,7 +163,9 @@ function hostTick() {      // host: send the fight to the guest
     t: 'snap',
     f: G.fighters.map(f => [FIGHTERS.indexOf(f.def), r1(f.x), r1(f.y), f.face, f.hp, r1(f.trail), f.state, f.t, f.move,
       f.onGround, f.flash, f.cd, f.combo, f.comboShow, r1(f.walkPhase), f.blockLow, r1(f.vy), f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, r1(f.heat || 0), Math.round(f.throwPull || 0)]),
-    p: G.projectiles.map(p => [r1(p.x), r1(p.y), p.vx, FIGHTERS.indexOf(p.owner.def), p.t, p.r]),
+    // 7th value: 1 = Ground Pulse, 2 = Static Orb (then the 6th is its explosion frame instead of the radius)
+    p: G.projectiles.map(p => p.s.type === 'trap' ? [r1(p.x), r1(p.y), 0, FIGHTERS.indexOf(p.owner.def), p.t, p.boom || 0, 2]
+      : [r1(p.x), r1(p.y), p.vx, FIGHTERS.indexOf(p.owner.def), p.t, p.r, p.s.type === 'pulse' ? 1 : 0]),
     g: [G.phase, G.timer, G.wins, G.round, G.msg, G.sub, G.msgT, r1(G.shake), G.paused],
     ev: NET.ev.splice(0),
   });
@@ -182,7 +184,9 @@ function applySnap(d) {
     f.def = FIGHTERS[a[0]];
     [, f.x, f.y, f.face, f.hp, f.trail, f.state, f.t, f.move, f.onGround, f.flash, f.cd, f.combo, f.comboShow, f.walkPhase, f.blockLow, f.vy, f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, f.heat, f.throwPull] = a;
   });
-  G.projectiles = d.p.map(a => ({x: a[0], y: a[1], vx: a[2], s: FIGHTERS[a[3]].special, t: a[4], r: a[5]}));
+  G.projectiles = d.p.map(a => a[6] === 2
+    ? {x: a[0], y: a[1], vx: 0, s: FIGHTERS[a[3]].trap, t: a[4], r: TRAP_R, boom: a[5]}
+    : {x: a[0], y: a[1], vx: a[2], s: a[6] ? FIGHTERS[a[3]].pulse : FIGHTERS[a[3]].special, t: a[4], r: a[5]});
   const was = G.phase;
   [G.phase, G.timer, G.wins, G.round, G.msg, G.sub, G.msgT, G.shake] = d.g;
   for (const e of d.ev) {

@@ -15,7 +15,10 @@ const ease = k => k * k * (3 - 2 * k);
 const DOWN_FWD_PUNCH = {dirs: ['down', 'fwd'], btn: 'punch'};
 const FIGHTERS = [
   {id: 'kade', name: 'Kade', title: 'Street brawler', desc: 'Balanced and steady.',
-   shirt: '#d8382c', pants: '#2a2a33', skin: '#e2a77c', hair: 'spiky', hairCol: '#24130d', band: '#f4f0e8', glove: '#8f1d16',
+   shirt: '#d8382c', pants: '#2a2a33', skin: '#e2a77c', band: '#f4f0e8', glove: '#8f1d16',
+   // look (Rick 2026-11-22, "the fighters look too similar"): tall bright spiky hair (orange roots -> yellow tips) and
+   // flame streaks up his pants (drawPantsFlames in draw.js). Was hair 'spiky', hairCol '#24130d' (dark brown).
+   hair: 'blaze', hairCol: '#ff6a12', hairTip: '#ffe04a', pantsFlames: true,
    speed: 3.4, power: 1.0, jump: 18,
    throwFx: '#ffa030',      // his hands light up in this colour while throwing (Rick 2026-11-21)
    // throwStyle: 'slam' (grab high, hoist overhead, slam into the floor) was his until Rick 2026-11-22 asked for a real
@@ -28,16 +31,45 @@ const FIGHTERS = [
    special: {name: 'Ember Shot', type: 'flame', color: '#ffb030', speed: 9, dmg: 9, seq: DOWN_FWD_PUNCH},
    // extra special moves (Rick 2026-11-21): done by a sequence like the blast, but each is a move in MOVES
    extras: [{name: 'Fiery Rush', move: 'fieryRush', seq: {dirs: ['down', 'fwd'], btn: 'kick'},
-     desc: 'Rushes forward, leg out and on fire. Knocks down'},
+     desc: 'Burning rush forward. Knocks down'},
     // Blaze Wheel: back, forward + kick since Rick 2026-11-22 (was down, back + kick, which now does Cinder Slide)
     {name: 'Blaze Wheel', move: 'blazeWheel', seq: {dirs: ['back', 'fwd'], btn: 'kick'},
-     desc: 'Hops up and spins forward with a burning kick, up to 3 hits. Last hit knocks down'},
+     desc: 'Spinning fire kick, 3 hits. Knocks down'},
     {name: 'Cinder Slide', move: 'cinderSlide', seq: {dirs: ['down', 'back'], btn: 'kick'},
-     desc: 'Slides low along the floor, under and past them to their other side. Knocks down'}]},
+     desc: 'Slides under and past them. Knocks down'},
+    // Flaming Flurry (Rick 2026-11-23): back, forward + punch = a quick series of burning punches; ends combos (knocks
+    // down a juggled rival) or a block string (last hit pushes back a little)
+    {name: 'Flaming Flurry', move: 'flamingFlurry', seq: {dirs: ['back', 'fwd'], btn: 'punch'},
+     desc: 'Fast burning punches, last pushes back. Ends combos'}]},
   {id: 'vex', name: 'Vex', title: 'Storm caller', desc: 'Slow, heavy energy blast.',
    shirt: '#7b4bd6', pants: '#1e1630', skin: '#c98d6a', hair: 'long', hairCol: '#e8e0ff', band: '#c7ff5a', glove: '#3a2466',
-   speed: 3.1, power: 1.0, jump: 17.5,
-   special: {name: 'Volt Orb', type: 'orb', color: '#c7ff5a', speed: 6.5, dmg: 11, seq: DOWN_FWD_PUNCH}},
+   // power 1.0 -> 0.85 (Rick 2026-11-23): the zoner's weakness is close-range damage. Strings, normals, throws and his
+   // melee specials do 15% less; Smite / Ground Pulse are blasts, which ignore power, so his zoning is unchanged.
+   speed: 3.1, power: 0.85, jump: 17.5,
+   // Smite (Rick 2026-11-22, replaces the Volt Orb blast): calls a lightning bolt down from the sky onto the spot where
+   // the rival stood when he cast it, after a short warning. Overhead (standing block only); dash or walk out of the
+   // marked spot to avoid it. See SMITE_* / updateSmite in fight.js, drawSmite in draw.js.
+   special: {name: 'Smite', type: 'smite', color: '#c7ff5a', speed: 0, dmg: 11, level: 'overhead', seq: DOWN_FWD_PUNCH,
+     desc: 'Lightning strikes where they stood. Dash away or stand-block'},
+   // Ground Pulse (Rick 2026-11-23): down, back + punch = slams the floor with electricity, sending a low pulse along
+   // the floor (pulse settings below; spawnPulse / updatePulse in fight.js). Low: crouch-block or jump over it.
+   extras: [{name: 'Ground Pulse', move: 'groundPulse', seq: {dirs: ['down', 'back'], btn: 'punch'},
+     desc: 'Slams the floor, a low pulse runs along it. Crouch-block or jump'},
+    // Shockwave (Rick 2026-11-23): back, forward + punch = a quick electric burst from his chest that shoves the rival
+    // far back (hit or block) for light damage: his "get off me" to make space for zoning
+    {name: 'Shockwave', move: 'shockwave', seq: {dirs: ['back', 'fwd'], btn: 'punch'},
+     desc: 'Burst that shoves them far back. Makes space'},
+    // Sky Bolt (Rick 2026-11-23): down, forward + kick = anti-air: bolts shoot up above him, launch on hit (also a
+    // jumping rival), high, and can extend a juggle mid-screen (M.extend: not limited like other launchers)
+    {name: 'Sky Bolt', move: 'skyBolt', seq: {dirs: ['down', 'fwd'], btn: 'kick'},
+     desc: 'Bolts shoot up and launch. Anti-air, extends juggles'},
+    // Static Orb (Rick 2026-11-23): down, back + kick = leaves a crackling orb floating in front of him for a few
+    // seconds (trap settings below; spawnTrap / updateTrap in fight.js). Harmless by itself; if Vex knocks the rival
+    // into it (they're in hitstun / knocked down / juggled), it zaps them and explodes, launching them.
+    {name: 'Static Orb', move: 'staticOrb', seq: {dirs: ['down', 'back'], btn: 'kick'},
+     desc: 'Leaves a floating orb. Hit them into it: it zaps and launches'}],
+   trap: {type: 'trap', color: '#c7ff5a', dmg: 6, life: 210},
+   pulse: {type: 'pulse', color: '#c7ff5a', speed: 8.5, dmg: 8}},      // speed 7 -> 8.5 (Rick 2026-11-23: "slightly faster")
   {id: 'rook', name: 'Rook', title: 'Mountain wrestler', desc: 'Slow, but hits hardest.',
    shirt: '#6b5a48', pants: '#3a3027', skin: '#8a5a3c', hair: 'bald', hairCol: '#1b120c', band: '#d9a441', glove: '#d9a441',
    speed: 2.7, power: 1.22, jump: 17,
@@ -98,7 +130,50 @@ const MOVES = {
   roundhouse: {startup: 9, active: 4, recovery: 27, dmg: 11, knockdown: true, launch: -8, kb: 6, lunge: 2, heavy: true, level: 'high', wind: 'chamber', hit: {x: 26, y: -164, w: 74, h: 44}},
   // launchers: end a string by knocking the rival up into the air for a juggle (juggle: true, launch = how hard)
   riser:      {startup: 8, active: 4, recovery: 12, dmg: 8, juggle: true, launch: -13, kb: 0.4, lunge: 3, heavy: true, wind: 'crouch', hit: {x: 14, y: -190, w: 52, h: 112}},
+  // Kade's Updraft (jab, low kick, riser) uses its own slower copies (Rick 2026-11-22: "too fast/strong, more
+  // punishable"); the shared lowKick / riser used by other strings stay as they were. Same look (poses aliased below).
+  // updraftKick: slower (8) and less blockstun (10), so on block the riser (startup 16) leaves a gap the blocker can
+  // jab through (free at 10, jab lands at 14). On hit, hitstun 24 still covers the riser, so it still combos.
+  // hit box reaches 90 px up (was 52, like lowKick) so it can also catch a juggled rival: needed for Kade's dash-in
+  // relaunch (Rick 2026-11-22). On the ground nothing changes (full-height hurtbox), and it's still a low for blocking.
+  updraftKick:  {startup: 8, active: 3, recovery: 20, dmg: 5, hitstun: 24, blockstun: 10, push: 2, lunge: 3, level: 'low', hit: {x: 24, y: -90, w: 62, h: 68}},
+  // updraftRiser: longer wind-up, longer recovery (+ BLOCK_PUNISH 24 on block), less damage, lower launch (fewer juggle hits)
+  // recovery 16 -> 12 (Rick 2026-11-22: "slightly faster", so a dash-in relaunch is possible); BLOCK_PUNISH +4 to match.
+  // kb 0.4 -> 1.5: pushes the launched rival a bit further away, so Kade's dash doesn't carry him underneath them.
+  updraftRiser: {startup: 16, active: 4, recovery: 12, dmg: 7, juggle: true, launch: -12, kb: 1.5, lunge: 2, heavy: true, wind: 'crouch', hit: {x: 14, y: -190, w: 52, h: 112}},
   skyKick:    {startup: 9, active: 4, recovery: 12, dmg: 8, juggle: true, launch: -13, kb: 0.4, lunge: 3, heavy: true, wind: 'chamber', hit: {x: 16, y: -176, w: 62, h: 100}},
+  // Kade's Flaming Flurry (Rick 2026-11-23): 4 quick punches (hits / hitEvery, alternating fists, flurryPose), creeping
+  // forward (rush 2.5, keeps going through hits so blocked pushes and juggles stay in reach). Mid. Last hit: push 10
+  // (a little knockback), ender = knocks a juggled rival down instead of popping them (ends the combo). On block the
+  // last hit pushes them a bit further (blockPush). fistFire = flames on both fists. close = computer uses it up close.
+  // Corner carry (Rick 2026-11-23: "no advantage over Blaze Wheel as a juggle finisher; less damage but more knockback"):
+  // dmg 3 -> 2.5, last hit kb 5 -> 14 / launch -6 -> -8 (a juggled rival flies far back), ground push 10 -> 16.
+  // Block unchanged (blockstun 17, blockPush 11). Then (Rick 2026-11-23, "knockback decrease moderately"):
+  // kb 14 -> 10, launch -8 -> -7, ground push 16 -> 13.
+  flamingFlurry: {startup: 6, active: 15, recovery: 16, dmg: 2.5, hits: 4, hitEvery: 4, rush: 2.5, hitstun: 18, push: 13,
+    blockstun: 17, blockPush: 11, ender: true, stringEnder: true, launch: -7, kb: 10, fistFire: true, flurry: true, close: true, heavy: true,
+    hit: {x: 18, y: -142, w: 70, h: 44}},
+  // Vex's Ground Pulse (Rick 2026-11-23): fist raised (wind), then slammed into the floor; on frame `startup` the pulse
+  // is sent (M.pulse, spawnPulse). No hit box of its own. level only labels it (move list, auto-block): the pulse is low.
+  groundPulse: {startup: 14, active: 2, recovery: 24, pulse: true, zap: true, level: 'low', wind: 'pulseWind'},
+  // Vex's Sky Bolt (Rick 2026-11-23): anti-air. Quick dip, then both hands thrown up and bolts shoot above him.
+  // juggle = launches; antiAir = also launches a rival who's jumping (not just knocks them down); extend = may pop an
+  // already-juggled rival mid-screen (still counts toward JUGGLE_MAX and combo scaling). High: crouching ducks it.
+  // bolts = draws the upward lightning (drawSkyBolts). Punishable if blocked (BLOCK_PUNISH) or whiffed (recovery).
+  // hang 12 + launch -12 -> -13.5 (Rick 2026-11-23: "hold the opponent and launch for longer", so follow-ups are easier)
+  // startup 6 -> 9 (Rick, same day): the trade-off for the easier juggles
+  skyBolt:     {startup: 9, active: 6, recovery: 22, dmg: 7, juggle: true, antiAir: true, extend: true, launch: -13.5, hang: 12, kb: 0.6, heavy: true,
+    level: 'high', zap: true, bolts: true, wind: 'crouch', hit: {x: -30, y: -250, w: 92, h: 130}},
+  // Vex's Static Orb (Rick 2026-11-23): gathers the orb in cupped hands (wind), then pushes one hand out to leave it
+  // floating in front of him on frame `startup` (M.trap, spawnTrap). No hit box of its own.
+  staticOrb:   {startup: 12, active: 2, recovery: 20, trap: true, zap: true, wind: 'shockWind'},
+  // Vex's Shockwave (Rick 2026-11-23): quick, short-range burst from the chest (arms pulled in, then thrown open).
+  // Light damage, big push on hit (push) and on block (blockPush), so it resets to a distance where he can zone.
+  // shock = draws the expanding electric ring (drawShockRing); close = the computer only uses it up close.
+  // startup 7 -> 12 (Rick 2026-11-23: "longer startup"): the ball takes longer to form, so it can be beaten by a quick hit
+  // more range (hit box w 96 -> 118) and push (24 -> 30, hit and block), Rick 2026-11-23
+  shockwave:   {startup: 12, active: 4, recovery: 18, dmg: 4, hitstun: 16, push: 30, blockstun: 12, blockPush: 30, zap: true, shock: true,
+    close: true, wind: 'shockWind', hit: {x: -4, y: -160, w: 118, h: 150}},
   // Kade's Fiery Rush (special, down, forward + kick since 2026-11-21; was + punch): rush = slides forward this fast from just before the hit until
   // it connects or ends; fire = flames on the front leg (drawLegFire) + a trail of flames (flames in update.js)
   // rush 9.5 -> 12, active 16 -> 18 (Rick 2026-11-21: travel farther, ~250 px if it doesn't hit)
@@ -110,10 +185,10 @@ const MOVES = {
   cinderSlide: {startup: 8, active: 22, recovery: 18, dmg: 9, knockdown: true, launch: -4, kb: 0.5, rush: 11, through: true,
     fire: true, fireY: 10, heavy: true, level: 'low', wind: 'crouch', hit: {x: 20, y: -44, w: 66, h: 44}},
   // Kade's Blaze Wheel (special, back, forward + kick since 2026-11-22; first down, back + kick, Rick 2026-11-21): hops up and spins spinN times while gliding
-  // forward (rush), burning leg out; up to `hits` hits, hitEvery frames apart, only the last knocks down. High, so
-  // crouching ducks it. Punishable on block (BLOCK_PUNISH).
+  // forward (rush), burning leg out; up to `hits` hits, hitEvery frames apart, only the last knocks down. Mid
+  // (Rick 2026-11-22; was high): blocked standing or crouching, and it reaches crouchers. Punishable on block (BLOCK_PUNISH).
   blazeWheel: {startup: 10, active: 24, recovery: 18, dmg: 5, knockdown: true, launch: -7, kb: 5, rush: 6, hits: 3, hitEvery: 8,
-    spinN: 3, fire: true, fireY: 108, heavy: true, level: 'high', wind: 'crouch', hit: {x: 8, y: -134, w: 84, h: 52}},
+    spinN: 3, fire: true, fireY: 108, heavy: true, wind: 'crouch', hit: {x: 8, y: -134, w: 84, h: 52}},      // mid since 2026-11-22 (Rick; was high)
   // Kade's Furnace Fist (Rick 2026-11-21): back + hold punch charges (state 'charging', CHARGE_* in fight.js), letting
   // go swings this. f.charge 0..1 adds dmgCharge damage and kbCharge knockback. Can be hit all through the charge and
   // the long recovery, but a block shoves the rival far away (blockPush), so it's hard to punish when blocked.
@@ -128,7 +203,7 @@ const MOVES = {
 // so the defender has time to hit back. Combo finishers, launchers and specials. A blocked one also can't be
 // special-cancelled to escape. (Throws can't be blocked; the energy blast is thrown from far away.)
 const BLOCK_PUNISH = {hook: 12, backfist: 12, roundhouse: 14, hammer: 14, riser: 18, skyKick: 18, fieryRush: 12, blazeWheel: 14,
-  axeKick: 14, cinderSlide: 14};
+  axeKick: 14, cinderSlide: 14, updraftRiser: 34, skyBolt: 16};
 // Combo strings: press these buttons one after another; each press after the first is only taken while the
 // previous hit connects (hits or is blocked), and turns into that string's next move instead of a plain punch/kick.
 // btns[0] is a normal standing punch or kick (moves[0] = 'punch' / 'kick'), or 'fwdKick' = toward + kick
@@ -137,7 +212,7 @@ const STRINGS = {
   kade: [
     {name: 'Street Rush',   btns: ['punch', 'punch', 'punch'], moves: ['punch', 'cross', 'hook']},
     {name: 'Alley Spin',    btns: ['punch', 'punch', 'kick'],  moves: ['punch', 'cross', 'roundhouse']},
-    {name: 'Updraft',       btns: ['punch', 'kick', 'punch'],  moves: ['punch', 'lowKick', 'riser']},
+    {name: 'Updraft',       btns: ['punch', 'kick', 'punch'],  moves: ['punch', 'updraftKick', 'updraftRiser']},
     // starts with the forward kick ('fwdKick' = toward + kick); 2nd hits low, 3rd comes down over the head (high)
     {name: 'Ashfall',       btns: ['fwdKick', 'kick', 'kick'], moves: ['lungeKick', 'lowKick', 'axeKick']},
   ],
@@ -161,7 +236,7 @@ const STRINGS = {
 const MOVE_NAMES = {punch: 'Jab', kick: 'Front kick', cross: 'Cross', lowKick: 'Low kick', knee: 'Knee',
   hook: 'Hook', backfist: 'Spinning backfist', roundhouse: 'Roundhouse (knocks down)', hammer: 'Hammer fist (knocks down)',
   riser: 'Rising uppercut (launches)', skyKick: 'Sky kick (launches)', fieryRush: 'Fiery Rush', lungePunch: 'Lunge punch', blazeWheel: 'Blaze Wheel', cinderSlide: 'Cinder Slide', lungeKick: 'Lunge kick', furnaceFist: 'Furnace Fist',
-  axeKick: 'Axe kick (knocks down)'};
+  axeKick: 'Axe kick (knocks down)', groundPulse: 'Ground Pulse', shockwave: 'Shockwave', skyBolt: 'Sky Bolt (launches)', staticOrb: 'Static Orb', flamingFlurry: 'Flaming Flurry', updraftKick: 'Low kick', updraftRiser: 'Rising uppercut (launches)'};
 const SPECIAL_WAIT = 80;
 // attack level: 'high', 'mid', 'low' or 'overhead' (energy blasts are high). Overhead = the opposite of low:
 // it reaches crouching fighters (like a mid) but only a standing block stops it.
@@ -210,7 +285,8 @@ const P = {
   // lunge kick: leaning back, front leg driven straight out at stomach height
   lungeKick:  {hip: [10, -74], neck: [-6, -120], head: [-13, -136], hF: [18, -108], hB: [-2, -112], fF: [90, -90], fB: [-10, 0]},
   // axe kick: leg raised straight up past the head (axeUp), then brought down in front at head height (axeKick)
-  axeUp:      {hip: [-4, -74], neck: [-14, -122], head: [-19, -140], hF: [12, -110], hB: [-8, -114], fF: [24, -152], fB: [-16, 0]},
+  // (up on the toes, leaning back, so the straight leg points almost straight up, high above the head)
+  axeUp:      {hip: [-12, -84], neck: [-40, -126], head: [-53, -140], hF: [-10, -112], hB: [-38, -106], fF: [-2, -164], fB: [-18, 0]},
   axeKick:    {hip: [6, -70], neck: [2, -120], head: [0, -138], hF: [26, -108], hB: [6, -112], fF: [78, -100], fB: [-18, 0]},
   // lunge punch: draw the fist back, then step in with the arm fully stretched out
   punchWind:  {hip: [-4, -72], neck: [-6, -122], head: [-8, -140], hF: [-6, -112], hB: [20, -122], fF: [24, 0], fB: [-22, 0]},
@@ -220,6 +296,25 @@ const P = {
   slamBack:   {hip: [-8, -64], neck: [-30, -106], head: [-42, -116], hF: [-56, -46], hB: [-60, -40], fF: [28, 0], fB: [-30, 0]},
   throwBack:  {hip: [-6, -70], neck: [-22, -120], head: [-28, -137], hF: [-52, -122], hB: [-58, -114], fF: [26, 0], fB: [-28, 0]},
   special:  {hip: [-2, -72], neck: [8, -124], head: [12, -142], hF: [58, -118], hB: [54, -106], fF: [26, 0], fB: [-26, 0]},
+  // Vex's Smite (Rick 2026-11-22): front hand raised straight up to the sky (held through the warning), then
+  // slammed down toward the target the moment the bolt lands (smitePose in draw.js)
+  smiteUp:   {hip: [-4, -75], neck: [-8, -127], head: [-12, -146], hF: [2, -176], hB: [22, -110], fF: [24, 0], fB: [-26, 0]},
+  // Vex's Ground Pulse: fist raised high, then crouched down with the fist slammed onto the floor in front
+  pulseWind:   {hip: [-2, -72], neck: [-4, -124], head: [-7, -142], hF: [16, -170], hB: [20, -108], fF: [24, 0], fB: [-26, 0]},
+  groundPulse: {hip: [6, -44], neck: [28, -90], head: [36, -105], hF: [52, -4], hB: [12, -66], fF: [34, 0], fB: [-30, 0]},
+  // Kade's Flaming Flurry: front fist out / back fist out, swapped every 2 frames while it's active
+  flamingFlurry: {hip: [2, -72], neck: [12, -122], head: [16, -140], hF: [40, -118], hB: [30, -112], fF: [30, 0], fB: [-24, 0]},
+  flurryA:   {hip: [4, -72], neck: [16, -122], head: [20, -140], hF: [76, -124], hB: [24, -112], fF: [32, 0], fB: [-22, 0]},
+  flurryB:   {hip: [4, -72], neck: [16, -122], head: [20, -140], hF: [30, -114], hB: [72, -120], fF: [32, 0], fB: [-22, 0]},
+  // Vex's Static Orb: front hand pushed out, palm forward, releasing the orb
+  staticOrb: {hip: [4, -72], neck: [12, -123], head: [15, -141], hF: [66, -112], hB: [18, -104], fF: [30, 0], fB: [-26, 0]},
+  // Vex's Sky Bolt: both hands thrown straight up (the bolts shoot out of them)
+  skyBolt:   {hip: [0, -76], neck: [2, -128], head: [4, -147], hF: [14, -178], hB: [-6, -174], fF: [24, 0], fB: [-24, 0]},
+  // Vex's Shockwave (Rick 2026-11-23): fists brought together in front of the chest forming an electric ball (wind),
+  // then both pushed forward together, driving the shockwave out of the ball into the rival
+  shockWind: {hip: [-4, -70], neck: [-4, -121], head: [-7, -139], hF: [26, -106], hB: [20, -100], fF: [22, 0], fB: [-28, 0]},
+  shockwave: {hip: [6, -70], neck: [18, -120], head: [22, -138], hF: [70, -114], hB: [64, -106], fF: [34, 0], fB: [-28, 0]},
+  smiteDown: {hip: [6, -70], neck: [20, -119], head: [26, -136], hF: [72, -94], hB: [8, -106], fF: [32, 0], fB: [-24, 0]},
   dashf:    {hip: [2, -64], neck: [20, -112], head: [27, -128], hF: [36, -100], hB: [26, -108], fF: [24, -10], fB: [-34, -4]},
   dashb:    {hip: [-2, -66], neck: [-12, -116], head: [-18, -133], hF: [20, -124], hB: [12, -116], fF: [30, -4], fB: [-20, -12]},
   // combo string moves
@@ -241,6 +336,8 @@ const P = {
   hammerUp:   {hip: [0, -74], neck: [4, -126], head: [6, -145], hF: [16, -192], hB: [8, -186], fF: [24, 0], fB: [-20, 0]},
   win:      {hip: [0, -74], neck: [2, -126], head: [4, -145], hF: [14, -196], hB: [-16, -106], fF: [18, 0], fB: [-18, 0]},
 };
+// Kade's Updraft moves look the same as the shared low kick / riser
+P.updraftKick = P.lowKick; P.updraftRiser = P.riser;
 function clonePose(p) { const o = {}; for (const k in p) o[k] = [p[k][0], p[k][1]]; return o; }
 function lerpPose(a, b, k) {
   const o = {};

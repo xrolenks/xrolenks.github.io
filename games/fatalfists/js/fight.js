@@ -26,6 +26,7 @@ function startMatch() {
   G.wins = [0, 0];
   G.round = 1;
   practiceReset();
+  clearDemo();      // practice: no combo demonstration left over (combos.js)
   startRound();
   tutReset();      // tutorial: set up its current step (skips the ROUND 1 intro)
   show('game');
@@ -55,6 +56,17 @@ const ACTIONABLE = new Set(['idle', 'walk', 'crouch', 'block', 'cblock']);
 const FLOORED = new Set(['knockdown', 'ko', 'down']);
 const clampF = k => Math.max(0, Math.min(1, k));
 const JUGGLE_MAX = 5;      // 'juggle' = launched into the air and still hittable (see applyHit)
+// Combo damage scaling: the first COMBO_FULL hits of a combo do full damage, then each later hit does
+// COMBO_STEP less, never below COMBO_MIN (juggle hits count as part of the same combo).
+// Stronger since 2026-11-22 (Rick: "less damage the more hits"): step 0.1 -> 0.15, floor 0.5 -> 0.3.
+const COMBO_FULL = 2, COMBO_STEP = 0.15, COMBO_MIN = 0.3;
+// Relaunching (a launcher hitting someone already juggled) only works this close to a wall (walls at 36 / W - 36)
+const CORNER_RANGE = 140;
+const inCorner = f => f.x < 36 + CORNER_RANGE || f.x > W - 36 - CORNER_RANGE;
+// Mid-screen it takes a dash-in string whose first hit catches them this low (px above the floor; they fall ~10 px a
+// frame there, so about a 3-4 frame window). Rick 2026-11-22: "precise timing, dash forward after the launch".
+const RELAUNCH_LOW = 36;
+const comboScale = n => Math.max(COMBO_MIN, 1 - COMBO_STEP * Math.max(0, n - COMBO_FULL));
 function setState(f, s) {
   if (s !== 'jump') f.flip = 0;      // an air attack or a hit ends the jump's flip (the rest of the jump is just the tuck)
   f.state = s; f.t = 0; if (s !== 'attack') f.move = null;
@@ -64,6 +76,7 @@ function want(f, b) { if (f.buf[b] > 0) { f.buf[b] = 0; return true; } return fa
 function canThrow(f) { return f.onGround && (ACTIONABLE.has(f.state) || f.state === 'attack' || f.state === 'charging'); }
 
 function startMove(f, m, chain = null) {
+  const fromDash = f.state === 'dashf';
   setState(f, 'attack');
   f.move = m; f.moveHit = false; f.pendSpecial = null;
   f.blockedExtra = 0;      // extra recovery frames if this move gets blocked (BLOCK_PUNISH)
@@ -72,6 +85,9 @@ function startMove(f, m, chain = null) {
   f.hitN = 0; f.lastHitT = 0;      // multi-hit moves: hits so far, and when the last one was
   practiceMove(f, m);      // practice mode: frame data card for this move
   f.chain = chain;      // buttons pressed so far in a combo string (only set for plain punch/kick and string moves)
+  // a new move that isn't the next hit of a string: note whether it came out of a forward dash (mid-screen relaunch,
+  // see applyHit), and forget any relaunch earned by the last string
+  if (!(chain && chain.length > 1)) { f.dashString = fromDash; f.relaunchOK = false; }
   if (f.onGround) f.vx = 0;
   if (!MOVES[m].projectile) SFX.whoosh();
 }
@@ -107,8 +123,13 @@ function seqDone(f, seq) { return seqStart(f, seq) >= 0; }
 function pickSpecial(f, btn) {
   const opts = [];
   const s = f.def.special.seq;
-  if (s && s.btn === btn && f.cd <= 0 && !G.projectiles.some(p => p.owner === f)) opts.push({move: 'special', t: seqStart(f, s.dirs)});
-  for (const x of f.def.extras || []) if (x.seq.btn === btn) opts.push({move: x.move, t: seqStart(f, x.seq.dirs)});
+  // (one of each on screen: a Ground Pulse travelling doesn't stop Vex casting Smite, and the other way round)
+  if (s && s.btn === btn && f.cd <= 0 && !G.projectiles.some(p => p.owner === f && p.s === f.def.special)) opts.push({move: 'special', t: seqStart(f, s.dirs)});
+  for (const x of f.def.extras || []) {
+    if (x.seq.btn !== btn) continue;
+    if (MOVES[x.move].pulse && G.projectiles.some(p => p.owner === f && p.s.type === 'pulse')) continue;
+    opts.push({move: x.move, t: seqStart(f, x.seq.dirs)});
+  }
   // the button has to come after the motion started: a punch pressed before it (e.g. the 2nd J of J, J, down,
   // forward + K, still in the input buffer) can't finish it (2026-11-22, for special cancels after strings)
   const pt = f.pressAt && f.pressAt[btn];
@@ -214,7 +235,8 @@ function control(f, foe) {
       // Cancelled out of a BLOCKED hit (Rick 2026-11-22): the special starts slower, so it lands only after the
       // blocker's blockstun ends + SPECIAL_GAP frames. A jab (startup 4) pressed as soon as they're free hits first,
       // so a string -> special on a blocking rival can be punished. On hit, specials still combo as before.
-      if (blocked) {
+      // (M.stringEnder, Kade's Flaming Flurry: made to end a block string, so it skips this slower start; Rick 2026-11-23)
+      if (blocked && !MOVES[ps.move].stringEnder) {
         const foe = G.fighters[1 - f.side];
         const left = foe.state === 'blockstun' ? Math.max(0, foe.stun - foe.t) : 0;
         f.hold = Math.max(0, left + SPECIAL_GAP - MOVES[ps.move].startup);
@@ -447,6 +469,11 @@ function updateFighter(f) {
   if (f.state === 'attack') {
     const M = MOVES[f.move];
     if (M.projectile && f.t === M.startup) spawnProjectile(f);
+    if (M.pulse && f.t === M.startup) spawnPulse(f);      // Vex's Ground Pulse: the fist hits the floor
+    if (M.trap && f.t === M.startup) spawnTrap(f);        // Vex's Static Orb is left floating
+    if (M.fistFire && f.t === 2) SFX.flame();      // Flaming Flurry: fists catch fire
+    if (M.bolts && f.t === M.startup) { SFX.zapUp(); spark(f.x, f.y - 190, f.def.special.color, 8); }      // Sky Bolt fires
+    if (M.shock && f.t === M.startup) { SFX.crackle(); SFX.whoosh(); spark(f.x + f.face * 70, f.y - 110, f.def.special.color, 8); }      // Shockwave bursts
     if (M.spin && (f.t === 3 || f.t === M.startup)) dust(f.x + f.face * 30, 6);      // spinning sweep kicks up dust
     if (f.onGround && M.rush) {
       // rushing move: slide forward until it connects or ends, then skid to a stop. If it's blocked, keep sliding
@@ -471,17 +498,19 @@ function updateFighter(f) {
   if (f.state === 'charging') updateCharge(f);
   // the thrower got knocked out of the throw (e.g. by a blast already flying): drop the held fighter
   if (f.state === 'held' && G.fighters[1 - f.side].state !== 'throwing') { setState(f, 'knockdown'); f.onGround = false; f.vy = -3; }
-  if ((f.state === 'hitstun' || f.state === 'blockstun') && f.t >= f.stun) setState(f, f.onGround ? 'idle' : 'jump');
+  if ((f.state === 'hitstun' || f.state === 'blockstun') && f.t >= f.stun) setState(f, f.onGround ? freeState(f) : 'jump');
   if (f.state === 'dashf' || f.state === 'dashb') {
     const top = f.state === 'dashf' ? DASH_SPEED : DASH_BACK;
     f.vx = f.dashDir * top * (f.t < DASH_FRAMES * 0.6 ? 1 : 0.45);
-    if (f.t >= DASH_FRAMES) { setState(f, 'idle'); f.vx = 0; }
+    if (f.t >= DASH_FRAMES) { setState(f, freeState(f)); f.vx = 0; }
   }
   if (f.state === 'down' && f.t >= 36) setState(f, 'getup');
-  if (f.state === 'getup' && f.t >= 20) setState(f, 'idle');
+  if (f.state === 'getup' && f.t >= 20) setState(f, freeState(f));
   if (f.state === 'walk') f.walkPhase += Math.abs(f.vx) * 0.11 * (f.vx * f.face > 0 ? 1 : -1);
 
-  if (!f.onGround) {
+  if (!f.onGround && f.hang > 0) {
+    f.hang--;      // held in the air (Vex's Sky Bolt): floats in place, then the launch takes over
+  } else if (!f.onGround) {
     f.vy += GRAV; f.x += f.vx; f.y += f.vy;
     if (f.y >= GROUND) { f.y = GROUND; f.vy = 0; f.onGround = true; land(f); }
   } else {
@@ -532,6 +561,10 @@ function hitRect(f) {
   return {x: f.face > 0 ? f.x + b.x : f.x - b.x - w, y: f.y + b.y, w, h: b.h};
 }
 function overlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+// The state a fighter goes into when getting up / hitstun / blockstun / a dash ends: straight into their block if
+// they're holding it (Rick 2026-11-23). Before, they went to 'idle' after this frame's controls had already run, so
+// for that one frame they could be hit while holding block (found testing Furnace Fist on wake-up).
+function freeState(f) { return f.held.block ? (f.held.down ? 'cblock' : 'block') : 'idle'; }
 function isBlocking(f) {
   return f.onGround && (f.state === 'block' || f.state === 'cblock' || (f.state === 'blockstun' && f.held.block));
 }
@@ -563,7 +596,9 @@ function checkHit(att, def) {
   if (att.move === 'airPunch') att.airPunchHit = true;      // lets a string carry on after landing
   if (M.hits) {      // only the last hit knocks down; the ones before keep them in a short stun, right in front
     att.hitN = (att.hitN || 0) + 1; att.lastHitT = att.t;
-    if (att.hitN < M.hits) M = Object.assign({}, M, {knockdown: false, hitstun: M.hitEvery + 12, push: 1, from: att.move});
+    // (carry: an airborne rival is carried along with the rush so the later hits still reach them, see applyHit)
+    // (blockPush 1: blocked early hits barely push, so the later hits still reach; the last hit uses the move's own)
+    if (att.hitN < M.hits) M = Object.assign({}, M, {knockdown: false, hitstun: M.hitEvery + 12, push: 1, blockPush: 1, from: att.move, carry: true});
     else M = Object.assign({}, M, {from: att.move});
   }
   // charged moves: more damage and knockback the longer it was charged
@@ -586,7 +621,7 @@ function applyHit(att, def, M, dir, sx, sy) {
     def.stun = M.blockstun || 12;
     // less push on a punishable block, so the attacker stays in reach; a lot on a heavy one (M.blockPush)
     def.vx = dir * (M.blockPush || (punishable ? 1.5 : 4));
-    if (M.blockPush) { G.shake = Math.max(G.shake, 6); dust(def.x, 6); }
+    if (M.blockPush > 4) { G.shake = Math.max(G.shake, 6); dust(def.x, 6); }      // (only a heavy shove shakes)
     G.hitstop = 4;
     SFX.block();
     spark(sx, sy, '#8fd8ff', 6);
@@ -599,17 +634,33 @@ function applyHit(att, def, M, dir, sx, sy) {
   // hit back while they're stuck recovering from a blocked finisher / special
   if (def.state === 'attack' && def.blockedExtra) { att.note = 'PUNISH!'; att.noteShow = 70; }
   const juggled = def.state === 'juggle';
-  // each extra hit in a juggle does a bit less damage (down to half)
-  const d = Math.round(M.dmg * pw * (juggled ? Math.max(0.5, 1 - 0.12 * def.juggleN) : 1));
+  def.hang = 0;      // any new hit ends a Sky Bolt hold; the juggle branch below may start a new one (M.hang)
+  // mid-screen relaunch (Rick 2026-11-22): a string started out of a forward dash whose FIRST hit catches the juggled
+  // rival low (within RELAUNCH_LOW px of the floor, ~3-4 frames before they land) may relaunch with its launcher
+  if (juggled && att.dashString && att.chain && att.chain.length === 1 && GROUND - def.y <= RELAUNCH_LOW) att.relaunchOK = true;
   const comboing = def.state === 'hitstun' || def.state === 'knockdown' || juggled;
   att.combo = comboing ? att.combo + 1 : 1;
+  // later hits in a combo do less damage (see comboScale), at least 1
+  const d = Math.max(1, Math.round(M.dmg * pw * comboScale(att.combo)));
   if (att.combo >= 2) att.comboShow = 80;
   def.hp = lowerHp(def, d);
   practiceContact(att, 'hit', d, M);
   def.flash = 6;
   if (def.hp <= 0) {
     setState(def, 'ko'); def.onGround = false; def.vy = -9; def.vx = dir * 5;
-  } else if ((M.juggle && def.onGround) || (juggled && def.juggleN < JUGGLE_MAX)) {
+  } else if (juggled && M.carry) {
+    // early hit of a multi-hit rush (Blaze Wheel) on someone in the air (Rick 2026-11-23: its last hit dropped in juggles,
+    // because the rush ran underneath them): carry them along at the rush speed with a small float so they stay in the
+    // spin. Doesn't count toward JUGGLE_MAX, so the last hit (a knockdown) always gets to land.
+    def.vy = -3.5; def.vx = dir * (MOVES[att.move].rush || 1);
+    def.t = 0;
+  } else if (!(juggled && M.ender) &&      // a combo ender (Flaming Flurry's last hit) knocks a juggled rival down
+             !(juggled && M.juggle && !M.extend && !inCorner(def) && !att.relaunchOK) &&
+             ((M.juggle && (def.onGround || M.antiAir)) || (juggled && def.juggleN < JUGGLE_MAX))) {
+    // (a launcher on someone already in the air only relaunches them in the corner; mid-screen it knocks them down,
+    // so launcher strings can't be looped: Rick 2026-11-22. Except a precise dash-in: see RELAUNCH_LOW. M.extend
+    // moves (Vex's Sky Bolt) may pop them mid-screen; JUGGLE_MAX still ends it. M.antiAir also launches a jumper.)
+    if (juggled && M.juggle && !M.extend && !inCorner(def)) { att.note = 'RELAUNCH!'; att.noteShow = 70; }
     // launcher: knock them up into the air, where they can still be hit (a juggle). Every hit pops them up again,
     // a bit less each time, and after JUGGLE_MAX extra hits the next one just knocks them down.
     def.juggleN = juggled ? def.juggleN + 1 : 0;
@@ -617,6 +668,7 @@ function applyHit(att, def, M, dir, sx, sy) {
     setState(def, 'juggle'); def.onGround = false;
     def.vy = juggled ? Math.min(-5, (M.launch || -11) * k) : M.launch;
     def.vx = dir * (juggled ? 0.8 : M.kb);
+    if (M.hang) def.hang = M.hang;      // Sky Bolt: held in the bolts for a moment before the launch
   } else if (M.knockdown || !def.onGround) {
     setState(def, 'knockdown'); def.onGround = false; def.vy = M.launch || -7; def.vx = dir * (M.kb || 4);
   } else {
@@ -630,8 +682,20 @@ function applyHit(att, def, M, dir, sx, sy) {
 }
 
 // ===== Energy blasts =====
+// Vex's Smite (Rick 2026-11-22): not a flying blast. Casting marks the rival's spot on the floor; after SMITE_WARN
+// frames of warning a bolt strikes a column SMITE_HALF px either side of it, live for SMITE_ACTIVE frames. Overhead,
+// so only a standing block stops it (crouching or jumping doesn't); moving out of the column avoids it (a dash gets
+// out in time if you react to the cast; walking out takes most of the warning).
+const SMITE_WARN = 20, SMITE_ACTIVE = 5, SMITE_END = 36, SMITE_HALF = 30;
 function spawnProjectile(f) {
   const s = f.def.special;
+  if (s.type === 'smite') {
+    const foe = G.fighters[0] === f ? G.fighters[1] : G.fighters[0];
+    G.projectiles.push({x: foe.x, y: GROUND, vx: 0, owner: f, s, t: 0, r: 0, dead: false});
+    f.cd = SPECIAL_WAIT;
+    SFX.special();
+    return;
+  }
   G.projectiles.push({x: f.x + f.face * 56, y: f.y - 114, vx: f.face * s.speed, owner: f, s, t: 0,
     r: s.type === 'orb' ? 18 : 14, dead: false});
   f.cd = SPECIAL_WAIT;
@@ -644,6 +708,9 @@ function circleRect(c, r) {
 function updateProjectiles() {
   const live = G.phase === 'fight';
   for (const p of G.projectiles) {
+    if (p.s.type === 'smite') { p.t++; updateSmite(p, live); continue; }
+    if (p.s.type === 'pulse') { p.x += p.vx; p.t++; updatePulse(p, live); continue; }
+    if (p.s.type === 'trap') { p.t++; updateTrap(p, live); continue; }
     p.x += p.vx; p.t++;
     if (p.s.type === 'flame' && p.t % 2 === 0) G.parts.push({x: p.x - Math.sign(p.vx) * 10, y: p.y + (Math.random() - 0.5) * 12,
       vx: -p.vx * 0.15, vy: -0.6, life: 16, max: 16, color: p.s.color, size: 5, kind: 'dot'});
@@ -657,13 +724,70 @@ function updateProjectiles() {
         Math.sign(p.vx), p.x, p.y);
     }
   }
-  const ps = G.projectiles;
+  const ps = G.projectiles.filter(p => !['smite', 'pulse', 'trap'].includes(p.s.type));      // two flying blasts cancel (Vex's Smite / Ground Pulse / Static Orb never clash)
   if (ps.length === 2 && !ps[0].dead && !ps[1].dead && Math.abs(ps[0].x - ps[1].x) < ps[0].r + ps[1].r) {
     ps[0].dead = ps[1].dead = true;
     spark((ps[0].x + ps[1].x) / 2, ps[0].y, '#ffffff', 16);
     SFX.block();
   }
-  G.projectiles = ps.filter(p => !p.dead);
+  G.projectiles = G.projectiles.filter(p => !p.dead);
+}
+// Vex's Ground Pulse (Rick 2026-11-23): a crackling wave along the floor from his fist, PULSE_H px tall and
+// PULSE_HALF px either side of its middle. Low: only a crouching block stops it; jumping clears it.
+const PULSE_H = 34, PULSE_HALF = 22;
+function spawnPulse(f) {
+  const s = f.def.pulse;
+  G.projectiles.push({x: f.x + f.face * 50, y: GROUND, vx: f.face * s.speed, owner: f, s, t: 0, r: 0, dead: false});
+  SFX.thud(); SFX.crackle();
+  G.shake = Math.max(G.shake, 4); spark(f.x + f.face * 50, GROUND - 6, s.color, 10); dust(f.x + f.face * 50, 6);
+}
+function updatePulse(p, live) {
+  if (p.t % 10 === 0) SFX.crackle();
+  if (p.x < -60 || p.x > W + 60) { p.dead = true; return; }
+  if (!live) return;
+  const foe = G.fighters[0] === p.owner ? G.fighters[1] : G.fighters[0];
+  const hb = hurtbox(foe, true);      // full height: a low reaches crouching fighters too (only their block stops it)
+  if (!hb || !overlap({x: p.x - PULSE_HALF, y: GROUND - PULSE_H, w: PULSE_HALF * 2, h: PULSE_H}, hb)) return;
+  p.dead = true;
+  applyHit(p.owner, foe, {dmg: p.s.dmg / p.owner.def.power, hitstun: 20, push: 3, blockstun: 14, level: 'low', blast: true},
+    Math.sign(p.vx), p.x, GROUND - 16);
+}
+// Vex's Static Orb (Rick 2026-11-23): floats TRAP_DX in front of him at waist height for trap.life frames. Harmless
+// on its own; if the rival touches it while reeling from Vex's hit (hitstun, knocked down or juggled), it zaps them
+// (part of the combo), launches them (extend: works mid-screen; antiAir: also from a knockdown) and explodes.
+// One at a time: casting again replaces it. p.boom counts the explosion frames.
+const TRAP_DX = 130, TRAP_Y = 82, TRAP_R = 22, TRAP_BOOM = 16;
+function spawnTrap(f) {
+  G.projectiles = G.projectiles.filter(p => !(p.owner === f && p.s.type === 'trap'));
+  G.projectiles.push({x: Math.max(40, Math.min(W - 40, f.x + f.face * TRAP_DX)), y: GROUND - TRAP_Y, vx: 0, owner: f, s: f.def.trap,
+    t: 0, r: TRAP_R, boom: 0, dead: false});
+  SFX.crackle();
+}
+function updateTrap(p, live) {
+  if (p.boom) { if (++p.boom > TRAP_BOOM) p.dead = true; return; }
+  if (p.t >= p.s.life) { p.dead = true; return; }
+  if (!live) return;
+  const foe = G.fighters[0] === p.owner ? G.fighters[1] : G.fighters[0];
+  if (!['hitstun', 'knockdown', 'juggle'].includes(foe.state)) return;      // only when Vex knocked them into it
+  // (a fighter flying from a knockdown has no hurtbox for normal attacks, so the orb uses a low body box for them)
+  const hb = foe.state === 'knockdown' ? {x: foe.x - 32, y: foe.y - 80, w: 64, h: 80} : hurtbox(foe, true);
+  if (!hb || !circleRect(p, hb)) return;
+  p.boom = 1;
+  SFX.thunder(); G.shake = Math.max(G.shake, 7); spark(p.x, p.y, p.s.color, 16);
+  applyHit(p.owner, foe, {dmg: p.s.dmg / p.owner.def.power, juggle: true, extend: true, antiAir: true, launch: -13, kb: 1,
+    heavy: true, blast: true}, Math.sign(foe.x - p.owner.x) || 1, p.x, p.y);
+}
+function updateSmite(p, live) {
+  if (p.t < SMITE_WARN && p.t % 6 === 1) SFX.crackle();
+  if (p.t === SMITE_WARN) { SFX.thunder(); G.shake = Math.max(G.shake, 8); spark(p.x, GROUND - 8, p.s.color, 14); dust(p.x, 8); }
+  if (p.t >= SMITE_END) { p.dead = true; return; }
+  if (!live || p.hit || p.t < SMITE_WARN || p.t >= SMITE_WARN + SMITE_ACTIVE) return;
+  const foe = G.fighters[0] === p.owner ? G.fighters[1] : G.fighters[0];
+  const hb = hurtbox(foe, true);      // full height: it comes from above, so crouching doesn't duck it
+  if (!hb || !overlap({x: p.x - SMITE_HALF, y: -1000, w: SMITE_HALF * 2, h: 2000}, hb)) return;
+  p.hit = true;
+  applyHit(p.owner, foe, {dmg: p.s.dmg / p.owner.def.power, hitstun: 24, push: 1, blockstun: 16, heavy: true, level: 'overhead', blast: true},
+    Math.sign(foe.x - p.owner.x) || 1, foe.x, hb.y + 24);
 }
 
 // ===== Keep fighters apart =====

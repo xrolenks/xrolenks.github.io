@@ -20,6 +20,7 @@ function step() {
       else if (i === 1 && G.mode === 'practice') inp = dummyInput();
       else if (i === 1 && G.mode === 'tutorial') inp = tutDummyInput(f, foe);
       else if (i === 1 && G.mode === 'online') inp = {held: NET.rheld, press: NET.rpress.splice(0)};
+      else if (i === 0 && demoActive()) inp = demoInput(f, foe);      // practice: a combo demonstration (combos.js)
       else inp = humanInput(G.mode === '2p' ? [KEYMAP[i]] : KEYMAP);
     }
     f.held = inp.held;

@@ -11,19 +11,32 @@ const PRAC = {stance: 'stand', block: false, hits: 0, dmg: 0, blocked: false, fd
 const isPractice = () => G.mode === 'practice' || G.mode === 'tutorial';
 
 function practiceReset() { PRAC.hits = 0; PRAC.dmg = 0; PRAC.blocked = false; PRAC.fd = null; PRAC.idleT = 0; }
-// the dummy's "keys", from the chosen dummy mode
+// the dummy's "keys", from the chosen dummy mode. PRAC.block = false (off), true (on: holds block in its stance) or
+// 'auto' (Rick 2026-11-22): always holds block and picks the guard that stops what's coming: crouches for lows,
+// stands for overheads and highs (incl. blasts); mids keep the chosen stance. Throws can't be blocked.
 function dummyInput() {
-  return {held: {block: PRAC.block, down: PRAC.stance === 'crouch'}, press: []};
+  let down = PRAC.stance === 'crouch';
+  if (PRAC.block === 'auto') {
+    const me = G.fighters[0];
+    // (a Ground Pulse on the floor is low; any other blast of yours is high, and Smite needs standing too)
+    const mine = G.projectiles.filter(p => p.owner === me);
+    const lv = me.state === 'attack' && MOVES[me.move] ? levelOf(MOVES[me.move])
+      : mine.some(p => p.s.type === 'pulse') ? 'low' : mine.length ? 'high' : 'mid';
+    if (lv === 'low') down = true;
+    else if (lv === 'overhead' || lv === 'high') down = false;
+  }
+  return {held: {block: !!PRAC.block, down}, press: []};
 }
-// the on-screen dummy buttons: data-stance="stand|crouch", data-block="0|1"
+// the on-screen dummy buttons: data-stance="stand|crouch", data-block="0|1|auto"
+const blockVal = v => v === 'auto' ? 'auto' : v === '1';
 function updateDummyPanel() {
   document.querySelectorAll('#dummyPanel [data-stance]').forEach(b => b.classList.toggle('cur', b.dataset.stance === PRAC.stance));
-  document.querySelectorAll('#dummyPanel [data-block]').forEach(b => b.classList.toggle('cur', (b.dataset.block === '1') === PRAC.block));
+  document.querySelectorAll('#dummyPanel [data-block]').forEach(b => b.classList.toggle('cur', blockVal(b.dataset.block) === PRAC.block));
 }
-document.querySelectorAll('#dummyPanel button').forEach(b => {
+document.querySelectorAll('#dummyPanel [data-stance], #dummyPanel [data-block]').forEach(b => {
   b.addEventListener('click', () => {
     if (b.dataset.stance) PRAC.stance = b.dataset.stance;
-    if (b.dataset.block) PRAC.block = b.dataset.block === '1';
+    if (b.dataset.block) PRAC.block = blockVal(b.dataset.block);
     updateDummyPanel();
     SFX_RAW.select();
     b.blur();      // so game keys aren't caught by the button

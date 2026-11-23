@@ -16,8 +16,11 @@
     <div id="dummyPanel">
       <b>Dummy</b>
       <div class="drow"><span>Stance</span><button data-stance="stand">Standing</button><button data-stance="crouch">Crouching</button></div>
-      <div class="drow"><span>Blocking</span><button data-block="0">Off</button><button data-block="1">On</button></div>
+      <div class="drow"><span>Blocking</span><button data-block="0">Off</button><button data-block="1">On</button><button data-block="auto">Auto</button></div>
+      <div class="drow"><button data-go="combos" class="combosBtn">Combos ▸</button></div>
     </div>
+    <!-- practice: the combo being demonstrated / tried, filled in by js/combos.js -->
+    <div id="comboPanel"></div>
     <!-- tutorial ("How to play"): the current step and its tasks, filled in by js/tutorial.js -->
     <div id="tutPanel"></div>
   </div>
@@ -37,25 +40,35 @@
 </div>
 
 <section class="screen on" id="s-title"><div class="box">
+  <!-- laid out in groups (Rick 2026-11-23: "not everything in one column, cleaner"): modes as cards, then learning
+       links in a row, then a quiet footer -->
   <h1 class="logo">FATAL FISTS</h1>
   <p class="tag">One-on-one arcade fighting</p>
-  <button class="btn" data-go="1p">1 Player</button>
-  <!-- 2 Players hidden for now (Rick 2026-11-21); the mode still works: <button class="btn" data-go="2p">2 Players</button> -->
-  <button class="btn" data-go="practice">Practice</button>
-  <button class="btn" data-go="online">Play online</button>
-  <button class="btn" data-go="help">How to play</button>
-  <button class="btn" data-go="moves">Move list</button>
-  <button class="btn" data-go="controls">Controls</button>
-  <button class="btn small" id="muteBtn">Sound: on</button>
-  <a class="back" href="/games/">&larr; Back to the games</a>
+  <div class="modes">
+    <button class="mode main" data-go="1p"><b>1 Player</b><small>Fight the computer</small></button>
+    <!-- 2 Players hidden for now (Rick 2026-11-21); the mode still works: <button class="mode" data-go="2p"><b>2 Players</b><small>Same keyboard</small></button> -->
+    <button class="mode" data-go="practice"><b>Practice</b><small>Train on a dummy</small></button>
+    <button class="mode" data-go="online"><b>Play online</b><small>Fight a friend</small></button>
+  </div>
+  <div class="links">
+    <button class="btn small" data-go="help">How to play</button>
+    <button class="btn small" data-go="moves">Move list</button>
+    <button class="btn small" data-go="controls">Controls</button>
+  </div>
+  <div class="foot">
+    <button class="btn small ghost" id="muteBtn">Sound: on</button>
+    <a class="back" href="/games/">&larr; Back to the games</a>
+  </div>
 </div></section>
 
 <section class="screen" id="s-level"><div class="box">
   <h2>How tough?</h2>
   <p class="hint">How good the computer fighter is.</p>
-  <button class="btn" data-level="0">Easy</button>
-  <button class="btn" data-level="1">Normal</button>
-  <button class="btn" data-level="2">Hard</button>
+  <div class="modes">
+    <button class="mode" data-level="0"><b>Easy</b><small>Learning the moves</small></button>
+    <button class="mode" data-level="1"><b>Normal</b><small>A fair fight</small></button>
+    <button class="mode" data-level="2"><b>Hard</b><small>Blocks and punishes</small></button>
+  </div>
   <button class="btn small" data-go="title">Back</button>
 </div></section>
 
@@ -83,9 +96,13 @@
 <section class="screen light" id="s-pause"><div class="box">
   <h2>Paused</h2>
   <button class="btn" data-go="resume">Resume</button>
-  <button class="btn" data-go="restart">Restart fight</button>  <button class="btn" data-go="moves">Move list</button>
-  <button class="btn" data-go="controls">Controls</button>
-  <button class="btn" data-go="title">Quit to menu</button>
+  <div class="links">
+    <button class="btn small" data-go="restart">Restart fight</button>
+    <button class="btn small" data-go="moves">Move list</button>
+    <button class="btn small" data-go="combos" id="pauseCombos" hidden>Combos</button>
+    <button class="btn small" data-go="controls">Controls</button>
+  </div>
+  <button class="btn small ghost" data-go="title">Quit to menu</button>
 </div></section>
 
 <section class="screen" id="s-controls"><div class="box">
@@ -97,12 +114,20 @@
 </div></section>
 
 <section class="screen" id="s-moves"><div class="box">
-  <h2>Move list</h2>
+  <!-- Back at the top too (Rick 2026-11-22), so you don't have to scroll down to leave -->
+  <div class="mhead"><button class="btn small" data-go="moves-back">← Back</button><h2>Move list</h2></div>
   <div class="mtabs" id="mtabs"></div>
   <div class="mtabs small" id="mplayer"></div>
   <div class="help" id="movelist"></div>
   <p class="hint" id="movesKeyHint"></p>
   <button class="btn small" data-go="moves-back">Back</button>
+</div></section>
+
+<!-- practice only: combos for your fighter, each with a demonstration (js/combos.js) -->
+<section class="screen" id="s-combos"><div class="box">
+  <div class="mhead"><button class="btn small" data-go="combos-back">← Back</button><h2 id="combosTitle">Combos</h2></div>
+  <p class="hint">Press <b>Watch</b> and the game does the combo on the dummy for you. Then try it yourself.</p>
+  <div id="combolist"></div>
 </div></section>
 
 <section class="screen light" id="s-end"><div class="box">
@@ -123,6 +148,7 @@
 <script src="js/draw.js"></script>
 <script src="js/online.js"></script>
 <script src="js/practice.js"></script>
+<script src="js/combos.js"></script>
 <script src="js/tutorial.js"></script>
 <script src="js/menus.js"></script>
 <script src="js/main.js"></script>
