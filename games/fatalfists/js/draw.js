@@ -162,7 +162,7 @@ function drawFighter(c, d, pose, x, y, face, sc, white) {
   drawHead(c, d, pose.head, white);
   arm(shF, eF, hF, false);
   if (pose.glow > 0 && d.throwFx) { drawHandGlow(c, hF, d.throwFx, pose.glow); drawHandGlow(c, hB, d.throwFx, pose.glow); }
-  if (pose.heat > 0) { drawFistHeat(c, hF, pose.heat); drawFistHeat(c, hB, pose.heat); }
+  if (pose.heat > 0) { drawFistFlame(c, hF, pose.heat, pose.flameLean || 0); drawFistHeat(c, hF, pose.heat); }      // only the punching fist
   c.restore();
 }
 // Heating fists (charge moves): k 0..1. Dark red embers at first, then orange, then a white-hot core and a big glow.
@@ -177,6 +177,29 @@ function drawFistHeat(c, h, k) {
   g.addColorStop(0.4, 'rgba(' + col + ',' + (0.35 + 0.45 * k) + ')');
   g.addColorStop(1, 'rgba(' + col + ',0)');
   c.fillStyle = g; c.beginPath(); c.arc(h[0], h[1], r, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+// Fire round a charging fist (Rick 2026-11-22): flickering tongues that grow from a small flicker to a big blaze as
+// k goes 0..1. lean tilts them (negative = trailing back, used while the punch flies forward).
+function drawFistFlame(c, h, k, lean) {
+  if (k < 0.03) return;
+  const tongue = (x, w, hgt, col) => {      // a teardrop flame standing on the fist, tip blown sideways by lean
+    const y = h[1] + w * 0.6, tx = x + lean * hgt, ty = y - hgt;
+    c.fillStyle = col; c.beginPath(); c.moveTo(x - w, y);
+    c.quadraticCurveTo(x - w * 1.1, y - hgt * 0.55, tx, ty);
+    c.quadraticCurveTo(x + w * 1.1, y - hgt * 0.55, x + w, y);
+    c.arc(x, y, w, 0, Math.PI); c.fill();
+  };
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  const size = 0.25 + 0.75 * k;      // overall scale: grows with the charge
+  for (let i = 0; i < 3; i++) {      // three tongues side by side, each flickering on its own
+    const fl = 1 + 0.18 * Math.sin(G.frame * (0.7 + i * 0.23) + i * 2), x = h[0] + (i - 1) * 6 * size;
+    const hgt = (18 + 46 * k) * size * fl * (i === 1 ? 1 : 0.72), w = (5 + 6 * k) * size * (i === 1 ? 1 : 0.75);
+    tongue(x, w * 1.35, hgt, 'rgba(220,50,15,0.5)');
+    tongue(x, w, hgt * 0.75, 'rgba(255,140,30,0.6)');
+    tongue(x, w * 0.55, hgt * 0.45, 'rgba(255,235,150,' + (0.4 + 0.5 * k) + ')');
+  }
   c.restore();
 }
 // glowing hand (Kade's throw): a soft flickering light round the glove, in the fighter's throwFx colour
@@ -286,27 +309,34 @@ function poseFor(f) {
       const top = slam ? 16 : fwd ? 18 : 16;
       const toss = slam ? (fwd ? P.slam : P.slamBack) : fwd ? P.throwToss : P.throwBack;
       let p;
-      if (t < THROW.lift) p = clonePose(P.throw);
-      else if (t < top) p = lerpPose(P.throw, P.throwLift, ease((t - THROW.lift) / (top - THROW.lift)));
+      const grabP = f.def.throwReach ? P.throwFar : P.throw;
+      if (f.def.throwStyle === 'heave') {      // arms round the waist, stand up with them on the shoulder, heave
+        const heave = fwd ? P.heaveFwd : P.heaveBack;
+        if (t < 4) p = lerpPose(grabP, P.heaveGrab, ease(t / 4));
+        else if (t < 16) p = lerpPose(P.heaveGrab, P.heaveLift, ease((t - 4) / 12));
+        else if (t < R) p = lerpPose(P.heaveLift, heave, ease((t - 16) / (R - 16)));
+        else p = lerpPose(heave, P.idle, ease(clamp01((t - R - 6) / (THROW.end - R - 6))));      // arms stay out a moment
+      }
+      else if (t < THROW.lift) p = clonePose(grabP);
+      else if (t < top) p = lerpPose(grabP, P.throwLift, ease((t - THROW.lift) / (top - THROW.lift)));
       else if (t < R) { const s = (t - top) / (R - top); p = lerpPose(P.throwLift, toss, slam ? s * s : ease(s)); }      // a slam speeds up
       else p = lerpPose(toss, P.idle, ease(clamp01((t - R - (slam ? 4 : 0)) / (THROW.end - R - (slam ? 4 : 0)))));      // a slam holds a moment
       if (t < R) {      // hands stay on the rival the whole time they're held
-        const [gx, gy] = throwGrip(f.def.throwStyle, f.throwDir, t);
+        const [gx, gy] = throwGrip(f.def.throwStyle, f.throwDir, t, f.throwPull || 0);
         p.hF = [gx, gy]; p.hB = [gx - 6, gy + 8];
       }
       if (f.def.throwFx) p.glow = t < R ? 1 : clamp01(1 - (t - R) / 8);
       return p;
     }
     case 'held': {          // being thrown: limp, then flipped over (backward toss) or bent back (forward toss)
-      const p = lerpPose(P.hit, P.fall, ease(clamp01(t / 10)));
-      if (G.fighters[1 - f.side].def.throwStyle === 'slam') {
-        // slam: upright while hoisted, then turned to land flat on their back (in front: tipped back a quarter turn;
-        // behind: carried over the top, three quarters round), so they match the lying pose when they hit the floor
-        const s = clamp01((t - 16) / (THROW.release - 16));
-        p.rot = (f.throwDir > 0 ? -Math.PI / 2 : Math.PI * 1.5) * s * s;
-      } else {
-        p.rot = f.throwDir > 0 ? -0.6 * ease(clamp01((t - 18) / 10)) : Math.PI * 2 * ease(clamp01((t - 4) / (THROW.release - 4)));
-      }
+      const style = G.fighters[1 - f.side].def.throwStyle;
+      let p;
+      if (style === 'heave') {      // stunned -> bent over the shoulder -> flung (the falling pose by release)
+        const up = ease(clamp01((t - 4) / 12)), h = ease(clamp01((t - 16) / (THROW.release - 16)));
+        p = lerpPose(lerpPose(P.hit, P.draped, up), P.fall, h);
+      } else p = lerpPose(P.hit, P.fall, ease(clamp01(t / 10)));
+      // how far they're turned (heldRot in fight.js: slam = flat on their back, heave = over the shoulder, toss = flip)
+      p.rot = heldRot(style, f.throwDir, t);
       return p;
     }
     case 'attack': {
@@ -321,13 +351,14 @@ function poseFor(f) {
         if (t < M.startup) k = t / M.startup;
         else if (t < M.startup + M.active) k = 1;
         else k = 1 - (t - M.startup - M.active) / (M.recovery + (f.blockedExtra || 0));      // blocked: slower recovery
-        p = lerpPose(base, P[f.move], ease(Math.max(0, Math.min(1, k))));
+        const to = M.throw && f.def.throwReach ? P.throwFar : P[f.move];      // long reach for the throw (Kade)
+        p = lerpPose(base, to, ease(Math.max(0, Math.min(1, k))));
       }
       // spinning move (Blaze Wheel): turns all the way round spinN times while active (squashing the drawing sideways)
       if (M.spinN && t >= M.startup && t < M.startup + M.active) p.sx = Math.cos(Math.PI * 2 * M.spinN * (t - M.startup) / M.active);
       if (M.throw && f.def.throwFx) p.glow = clamp01(t / 3);
       // charged punch: fists stay as hot as the charge through the swing, then cool off during the recovery
-      if (M.heat) { const end = M.startup + M.active; p.heat = (f.heat || 0) * (t < end ? 1 : clamp01(1 - (t - end) / 14)); }      // hands light up as they reach for the grab
+      if (M.heat) { const end = M.startup + M.active; p.heat = (f.heat || 0) * (t < end ? 1 : clamp01(1 - (t - end) / 14)); p.flameLean = -0.9; }      // flames trail back as the fist flies
       // burning leg: flares up just before the rush, dies down in the first frames of recovery
       if (M.fire) {
         const end = M.startup + M.active;
@@ -431,7 +462,10 @@ function render() {
       ctx.fillStyle = 'rgba(0,0,0,.45)';
       ctx.beginPath(); ctx.ellipse(f.x, GROUND + 3, 38 * sc, 8 * sc, 0, 0, Math.PI * 2); ctx.fill();
     }
-    const order = b.state === 'attack' && a.state !== 'attack' ? [a, b] : [b, a];
+    let order = b.state === 'attack' && a.state !== 'attack' ? [a, b] : [b, a];
+    // someone being heaved over a shoulder goes in front of the thrower, so the carry shows
+    const heaved = [a, b].find(f => f.state === 'held' && G.fighters[1 - f.side].def.throwStyle === 'heave');
+    if (heaved) order = [G.fighters[1 - heaved.side], heaved];
     for (const f of order) drawFighter(ctx, f.def, poseFor(f), f.x, f.y, f.face, 1, f.flash > 3);
     for (const p of G.projectiles) drawProjectile(ctx, p);
     drawParts(ctx);
@@ -476,7 +510,7 @@ function drawHUD() {
       c.lineWidth = 2; c.strokeStyle = '#000'; c.stroke();
     }
     // combo (practice mode has its own hits / damage box instead)
-    if (f.comboShow > 0 && !isPractice()) {
+    if (f.comboShow > 0 && G.mode !== 'practice') {
       c.globalAlpha = Math.min(1, f.comboShow / 20);
       c.font = 'italic 900 34px system-ui, sans-serif';
       c.textAlign = right ? 'right' : 'left';
@@ -504,7 +538,7 @@ function drawHUD() {
   c.font = '900 30px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillStyle = G.timer <= 10 ? '#ff5a4d' : '#fff';
   c.fillText(isPractice() ? '∞' : String(G.timer).padStart(2, '0'), 480, 38);
-  if (isPractice()) drawPracticeHUD(c);
+  if (G.mode === 'practice') drawPracticeHUD(c);      // (the tutorial has its own HTML panel instead)
 }
 function drawMsg() {
   if (!G.msg) return;

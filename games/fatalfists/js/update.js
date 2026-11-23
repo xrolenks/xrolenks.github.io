@@ -18,6 +18,7 @@ function step() {
     if (live) {
       if (i === 1 && G.mode === '1p') inp = aiThink(f, foe);
       else if (i === 1 && G.mode === 'practice') inp = dummyInput();
+      else if (i === 1 && G.mode === 'tutorial') inp = tutDummyInput(f, foe);
       else if (i === 1 && G.mode === 'online') inp = {held: NET.rheld, press: NET.rpress.splice(0)};
       else inp = humanInput(G.mode === '2p' ? [KEYMAP[i]] : KEYMAP);
     }
@@ -72,6 +73,7 @@ function step() {
   separate(a, b);
   if (G.phase === 'fight' && (a.hp <= 0 || b.hp <= 0)) endRound(false);
   practiceTick();
+  tutTick();
   updateParts();
   G.shake *= 0.85;
 }

@@ -7,7 +7,8 @@
 // (#dummyPanel, only while playing practice): stance standing / crouching, blocking off / on.
 const DUMMY_REFILL = 50;      // frames left alone before the dummy's health refills
 const PRAC = {stance: 'stand', block: false, hits: 0, dmg: 0, blocked: false, fd: null, idleT: 0};
-const isPractice = () => G.mode === 'practice';
+// (the tutorial, tutorial.js, works like practice: dummy, no clock, no K.O.)
+const isPractice = () => G.mode === 'practice' || G.mode === 'tutorial';
 
 function practiceReset() { PRAC.hits = 0; PRAC.dmg = 0; PRAC.blocked = false; PRAC.fd = null; PRAC.idleT = 0; }
 // the dummy's "keys", from the chosen dummy mode
@@ -31,7 +32,8 @@ document.querySelectorAll('#dummyPanel button').forEach(b => {
 updateDummyPanel();
 // take d health off a fighter; in practice the dummy never drops below 1 (so it never gets knocked out)
 function lowerHp(def, d) {
-  return Math.max(isPractice() && def.side === 1 ? 1 : 0, def.hp - d);
+  // (in the tutorial you can't be knocked out either)
+  return Math.max(isPractice() && (def.side === 1 || G.mode === 'tutorial') ? 1 : 0, def.hp - d);
 }
 
 // ----- what the player does to the dummy -----
@@ -44,8 +46,9 @@ function practiceMove(f, m) {
   PRAC.fd = {name, startup: M.startup, active: M.active, recovery: M.recovery, contact: null, hitT: null,
     adv: null, aFree: null, bFree: null, charge: m === f.def.backCharge ? f.charge : null};
 }
-// it touched the dummy: kind = 'hit', 'block' or 'throw'; d = damage done
-function practiceContact(att, kind, d) {
+// it touched the dummy: kind = 'hit', 'block' or 'throw'; d = damage done; M = the move (if known)
+function practiceContact(att, kind, d, M) {
+  tutContact(att, kind, M);      // tutorial tasks (tutorial.js)
   if (!isPractice() || att.side !== 0) return;
   if (kind === 'block') { PRAC.hits = 0; PRAC.dmg = d; PRAC.blocked = true; }
   else {

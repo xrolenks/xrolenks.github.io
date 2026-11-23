@@ -18,7 +18,10 @@ const FIGHTERS = [
    shirt: '#d8382c', pants: '#2a2a33', skin: '#e2a77c', hair: 'spiky', hairCol: '#24130d', band: '#f4f0e8', glove: '#8f1d16',
    speed: 3.4, power: 1.0, jump: 18,
    throwFx: '#ffa030',      // his hands light up in this colour while throwing (Rick 2026-11-21)
-   throwStyle: 'slam',      // grabs high, hoists them overhead and slams them into the floor (others toss)
+   // throwStyle: 'slam' (grab high, hoist overhead, slam into the floor) was his until Rick 2026-11-22 asked for a real
+   // toss forward / behind instead; the slam code is kept in fight.js / draw.js in case it comes back.
+   throwStyle: 'heave',     // arms round the waist, up onto the shoulder, heaved off forward / over behind (Rick 2026-11-22)
+   throwReach: 14,          // his throw reaches this many px further (arms stretch further out, Rick 2026-11-22)
    fwdPunch: 'lungePunch',  // toward + punch = this move instead of the jab (Rick 2026-11-21); others: still the jab
    fwdKick: 'lungeKick',    // toward + kick = this move instead of the front kick; it can start a string ('fwdKick')
    backCharge: 'furnaceFist',      // back + HOLD punch = charge this move, let go to swing (a quick tap = jab)
@@ -26,8 +29,11 @@ const FIGHTERS = [
    // extra special moves (Rick 2026-11-21): done by a sequence like the blast, but each is a move in MOVES
    extras: [{name: 'Fiery Rush', move: 'fieryRush', seq: {dirs: ['down', 'fwd'], btn: 'kick'},
      desc: 'Rushes forward, leg out and on fire. Knocks down'},
-    {name: 'Blaze Wheel', move: 'blazeWheel', seq: {dirs: ['down', 'back'], btn: 'kick'},
-     desc: 'Hops up and spins forward with a burning kick, up to 3 hits. Last hit knocks down'}]},
+    // Blaze Wheel: back, forward + kick since Rick 2026-11-22 (was down, back + kick, which now does Cinder Slide)
+    {name: 'Blaze Wheel', move: 'blazeWheel', seq: {dirs: ['back', 'fwd'], btn: 'kick'},
+     desc: 'Hops up and spins forward with a burning kick, up to 3 hits. Last hit knocks down'},
+    {name: 'Cinder Slide', move: 'cinderSlide', seq: {dirs: ['down', 'back'], btn: 'kick'},
+     desc: 'Slides low along the floor, under and past them to their other side. Knocks down'}]},
   {id: 'vex', name: 'Vex', title: 'Storm caller', desc: 'Slow, heavy energy blast.',
    shirt: '#7b4bd6', pants: '#1e1630', skin: '#c98d6a', hair: 'long', hairCol: '#e8e0ff', band: '#c7ff5a', glove: '#3a2466',
    speed: 3.1, power: 1.0, jump: 17.5,
@@ -97,7 +103,13 @@ const MOVES = {
   // it connects or ends; fire = flames on the front leg (drawLegFire) + a trail of flames (flames in update.js)
   // rush 9.5 -> 12, active 16 -> 18 (Rick 2026-11-21: travel farther, ~250 px if it doesn't hit)
   fieryRush:  {startup: 9, active: 18, recovery: 24, dmg: 11, knockdown: true, launch: -7, kb: 6, rush: 12, fire: true, heavy: true, wind: 'crouch', hit: {x: 30, y: -120, w: 76, h: 48}},
-  // Kade's Blaze Wheel (special, down, back + kick, Rick 2026-11-21): hops up and spins spinN times while gliding
+  // Kade's Cinder Slide (special, down, back + kick, Rick 2026-11-22): slides along the floor (rush) leg first with a
+  // burning foot. through = keeps sliding after it hits, right under and past them, so he ends up on their other side
+  // (separate() lets him pass while sliding). Low: only a crouching block stops it; blocked = stops at their guard and
+  // is punishable. Knocks down with almost no push, so the slide carries on past the fallen rival. Ducks highs (isLow).
+  cinderSlide: {startup: 8, active: 22, recovery: 18, dmg: 9, knockdown: true, launch: -4, kb: 0.5, rush: 11, through: true,
+    fire: true, fireY: 10, heavy: true, level: 'low', wind: 'crouch', hit: {x: 20, y: -44, w: 66, h: 44}},
+  // Kade's Blaze Wheel (special, back, forward + kick since 2026-11-22; first down, back + kick, Rick 2026-11-21): hops up and spins spinN times while gliding
   // forward (rush), burning leg out; up to `hits` hits, hitEvery frames apart, only the last knocks down. High, so
   // crouching ducks it. Punishable on block (BLOCK_PUNISH).
   blazeWheel: {startup: 10, active: 24, recovery: 18, dmg: 5, knockdown: true, launch: -7, kb: 5, rush: 6, hits: 3, hitEvery: 8,
@@ -106,7 +118,7 @@ const MOVES = {
   // go swings this. f.charge 0..1 adds dmgCharge damage and kbCharge knockback. Can be hit all through the charge and
   // the long recovery, but a block shoves the rival far away (blockPush), so it's hard to punish when blocked.
   furnaceFist: {startup: 6, active: 4, recovery: 34, dmg: 12, dmgCharge: 12, knockdown: true, launch: -6, kb: 8, kbCharge: 6,
-    blockstun: 20, blockPush: 22, lunge: 4, heavy: true, basePose: 'furnaceWind', heat: true, hit: {x: 34, y: -128, w: 68, h: 30}},
+    blockstun: 20, blockPush: 22, lunge: 7, heavy: true, basePose: 'furnaceWind', heat: true, hit: {x: 44, y: -128, w: 68, h: 30}},
   // axe kick (end of Ashfall): leg swung up over their head, then chopped down onto it. Overhead (Rick 2026-11-21):
   // hits crouching fighters and goes through a crouching block; only a standing block stops it. Knocks down.
   axeKick:    {startup: 12, active: 4, recovery: 26, dmg: 11, knockdown: true, launch: -5, kb: 4, lunge: 2, heavy: true, level: 'overhead', wind: 'axeUp', hit: {x: 22, y: -172, w: 70, h: 92}},
@@ -116,7 +128,7 @@ const MOVES = {
 // so the defender has time to hit back. Combo finishers, launchers and specials. A blocked one also can't be
 // special-cancelled to escape. (Throws can't be blocked; the energy blast is thrown from far away.)
 const BLOCK_PUNISH = {hook: 12, backfist: 12, roundhouse: 14, hammer: 14, riser: 18, skyKick: 18, fieryRush: 12, blazeWheel: 14,
-  axeKick: 14};
+  axeKick: 14, cinderSlide: 14};
 // Combo strings: press these buttons one after another; each press after the first is only taken while the
 // previous hit connects (hits or is blocked), and turns into that string's next move instead of a plain punch/kick.
 // btns[0] is a normal standing punch or kick (moves[0] = 'punch' / 'kick'), or 'fwdKick' = toward + kick
@@ -148,7 +160,7 @@ const STRINGS = {
 // Names shown in the move list
 const MOVE_NAMES = {punch: 'Jab', kick: 'Front kick', cross: 'Cross', lowKick: 'Low kick', knee: 'Knee',
   hook: 'Hook', backfist: 'Spinning backfist', roundhouse: 'Roundhouse (knocks down)', hammer: 'Hammer fist (knocks down)',
-  riser: 'Rising uppercut (launches)', skyKick: 'Sky kick (launches)', fieryRush: 'Fiery Rush', lungePunch: 'Lunge punch', blazeWheel: 'Blaze Wheel', lungeKick: 'Lunge kick', furnaceFist: 'Furnace Fist',
+  riser: 'Rising uppercut (launches)', skyKick: 'Sky kick (launches)', fieryRush: 'Fiery Rush', lungePunch: 'Lunge punch', blazeWheel: 'Blaze Wheel', cinderSlide: 'Cinder Slide', lungeKick: 'Lunge kick', furnaceFist: 'Furnace Fist',
   axeKick: 'Axe kick (knocks down)'};
 const SPECIAL_WAIT = 80;
 // attack level: 'high', 'mid', 'low' or 'overhead' (energy blasts are high). Overhead = the opposite of low:
@@ -173,14 +185,28 @@ const P = {
   airPunch: {hip: [0, -80], neck: [12, -128], head: [17, -145], hF: [56, -78], hB: [2, -118], fF: [14, -44], fB: [-14, -50]},      // punching down and forward
   airKick:  {hip: [-6, -82], neck: [-22, -126], head: [-30, -142], hF: [6, -116], hB: [-18, -120], fF: [72, -62], fB: [-14, -50]},
   throw:    {hip: [4, -72], neck: [14, -124], head: [18, -142], hF: [48, -128], hB: [44, -110], fF: [28, 0], fB: [-22, 0]},
+  // heave throw (throwStyle 'heave', Kade; Rick 2026-11-22). Hands are put on the rival's waist by throwGrip.
+  heaveGrab:  {hip: [10, -62], neck: [32, -106], head: [40, -121], hF: [60, -74], hB: [54, -70], fF: [36, 0], fB: [-26, 0]},      // bent in, arms round the waist
+  heaveLift:  {hip: [0, -72], neck: [0, -124], head: [-6, -142], hF: [16, -132], hB: [10, -126], fF: [26, 0], fB: [-26, 0]},      // stood up, rival on the shoulder
+  heaveFwd:   {hip: [12, -68], neck: [32, -114], head: [40, -130], hF: [92, -122], hB: [86, -114], fF: [42, 0], fB: [-24, 0]},      // hurling them out in front, arms stretched
+  heaveBack:  {hip: [-6, -68], neck: [-22, -114], head: [-30, -130], hF: [-70, -82], hB: [-66, -76], fF: [28, 0], fB: [-30, 0]},      // twisting back over the shoulder, arms stretched
+  // the rival during a heave, drawn before it's turned a quarter turn (heldRot): after turning, the legs hang down in
+  // front of the thrower and the upper body hangs down his back, bent over the shoulder at the waist
+  draped:     {hip: [0, -72], neck: [22, -117], head: [31, -135], hF: [70, -112], hB: [64, -106], fF: [68, -42], fB: [60, -36]},
+  // long-armed grab (fighters with throwReach, Kade; Rick 2026-11-22): leaning in, both arms stretched right out
+  throwFar: {hip: [10, -70], neck: [26, -120], head: [32, -138], hF: [80, -124], hB: [74, -110], fF: [38, 0], fB: [-24, 0]},
   // throw animation (attacker): lift the rival up, then heave them forward (throwToss) or swing them over the head (throwBack)
   throwLift:  {hip: [0, -70], neck: [-4, -122], head: [-6, -141], hF: [30, -168], hB: [22, -162], fF: [24, 0], fB: [-26, 0]},
   throwToss:  {hip: [10, -68], neck: [30, -114], head: [37, -129], hF: [74, -100], hB: [68, -92], fF: [36, 0], fB: [-22, 0]},
   // Blaze Wheel: off the ground (whole pose ~30 px up), kicking leg straight out at chest height, other leg tucked
+  // Cinder Slide: leaning right back, low to the floor, front leg straight out along the ground, back hand trailing
+  cinderSlide: {hip: [0, -24], neck: [-36, -52], head: [-48, -66], hF: [-14, -40], hB: [-50, -12], fF: [76, -6], fB: [24, 0]},
   blazeWheel: {hip: [0, -102], neck: [-6, -152], head: [-9, -170], hF: [16, -140], hB: [-18, -136], fF: [78, -108], fB: [-4, -66]},
-  // Furnace Fist: wound up (fists pulled back low, weight on the back foot), then a huge straight punch stepping in
-  furnaceWind: {hip: [-8, -66], neck: [-16, -114], head: [-21, -131], hF: [-30, -100], hB: [-38, -94], fF: [26, 0], fB: [-30, 0]},
-  furnaceFist: {hip: [16, -68], neck: [38, -112], head: [46, -127], hF: [96, -116], hB: [18, -104], fF: [50, 0], fB: [-30, 0]},
+  // Furnace Fist: wound up in a low, wide stance (Rick 2026-11-22: feet further apart, only the punching fist pulled
+  // back to the hip, elbow pointing back, the other one stays up in front as a guard), then a huge straight punch stepping in
+  furnaceWind: {hip: [-6, -52], neck: [-10, -102], head: [-14, -120], hF: [-16, -60], hB: [24, -96], fF: [44, 0], fB: [-48, 0]},
+  // (Rick 2026-11-22: lunges deeper, front foot further out and the arm reaching ~10 px further)
+  furnaceFist: {hip: [22, -62], neck: [46, -106], head: [54, -121], hF: [106, -112], hB: [24, -98], fF: [62, 0], fB: [-30, 0]},
   // lunge kick: leaning back, front leg driven straight out at stomach height
   lungeKick:  {hip: [10, -74], neck: [-6, -120], head: [-13, -136], hF: [18, -108], hB: [-2, -112], fF: [90, -90], fB: [-10, 0]},
   // axe kick: leg raised straight up past the head (axeUp), then brought down in front at head height (axeKick)

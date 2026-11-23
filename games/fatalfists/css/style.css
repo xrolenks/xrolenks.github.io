@@ -14,6 +14,27 @@ body.playing.practice #dummyPanel{display:block}
 #dummyPanel .drow span{opacity:.75;margin-right:.2em}
 #dummyPanel button{font:inherit;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:.15em .55em;cursor:pointer}
 #dummyPanel button.cur{background:#ffcf5a;color:#111;border-color:#ffcf5a}
+/* tutorial ("How to play"): the step + its tasks, top middle under the pause button (js/tutorial.js) */
+#tutPanel{position:absolute;top:19%;left:50%;transform:translateX(-50%);width:min(54%,500px);display:none;padding:.5em .8em .55em;font:600 clamp(9px,1.25vw,14px)/1.35 system-ui,sans-serif;color:var(--ink);background:rgba(0,0,0,.66);border:1px solid rgba(255,207,90,.35);border-radius:8px}
+body.playing.tutorial #tutPanel{display:block}
+#tutPanel .tstep{color:var(--gold);font-weight:800;font-size:.78em;letter-spacing:.1em;text-transform:uppercase}
+#tutPanel h3{margin:0 0 .2em;font:italic 900 1.4em system-ui,sans-serif}
+#tutPanel p{margin:.15em 0 .35em;opacity:.85}
+#tutPanel ul{list-style:none;margin:.25em 0;padding:0}
+#tutPanel li{position:relative;padding:.1em 0 .1em 1.6em;opacity:.55}
+#tutPanel li::before{content:'';position:absolute;left:.15em;top:.28em;width:.85em;height:.85em;border:2px solid rgba(255,255,255,.45);border-radius:3px;box-sizing:border-box}
+#tutPanel li.cur{opacity:1}
+#tutPanel li.done{opacity:.9;color:#7dff8a}
+#tutPanel li.done::before{content:'✓';border-color:#7dff8a;background:#7dff8a;color:#111;font:900 .7em/1.15 system-ui;text-align:center}
+#tutPanel li.just::before{animation:tick .4s ease-out}
+@keyframes tick{0%{transform:scale(2.2)}60%{transform:scale(.85)}100%{transform:scale(1)}}
+#tutPanel kbd{font-size:.9em;color:var(--ink)}
+#tutPanel .arr{color:var(--gold)}
+#tutPanel .tbtns{display:flex;flex-wrap:wrap;gap:.4em;justify-content:flex-end;margin-top:.4em}
+#tutPanel button{font:700 .9em system-ui,sans-serif;color:var(--ink);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:.2em .6em;cursor:pointer}
+#tutPanel button:hover{background:rgba(255,207,90,.25)}
+/* phone held upright: the game is a thin strip, so the panel goes in the empty space above it */
+@media (orientation:portrait) and (max-width:700px){#tutPanel{position:fixed;top:8px;width:calc(100vw - 20px);max-width:520px;font-size:12px;box-sizing:border-box}}
 
 /* touch controls */
 #touch{display:none;width:100%;max-width:640px;justify-content:space-between;align-items:center;padding:12px 16px}

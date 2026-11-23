@@ -162,7 +162,7 @@ function hostTick() {      // host: send the fight to the guest
   netSend({
     t: 'snap',
     f: G.fighters.map(f => [FIGHTERS.indexOf(f.def), r1(f.x), r1(f.y), f.face, f.hp, r1(f.trail), f.state, f.t, f.move,
-      f.onGround, f.flash, f.cd, f.combo, f.comboShow, r1(f.walkPhase), f.blockLow, r1(f.vy), f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, r1(f.heat || 0)]),
+      f.onGround, f.flash, f.cd, f.combo, f.comboShow, r1(f.walkPhase), f.blockLow, r1(f.vy), f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, r1(f.heat || 0), Math.round(f.throwPull || 0)]),
     p: G.projectiles.map(p => [r1(p.x), r1(p.y), p.vx, FIGHTERS.indexOf(p.owner.def), p.t, p.r]),
     g: [G.phase, G.timer, G.wins, G.round, G.msg, G.sub, G.msgT, r1(G.shake), G.paused],
     ev: NET.ev.splice(0),
@@ -180,7 +180,7 @@ function applySnap(d) {
   d.f.forEach((a, i) => {
     const f = G.fighters[i];
     f.def = FIGHTERS[a[0]];
-    [, f.x, f.y, f.face, f.hp, f.trail, f.state, f.t, f.move, f.onGround, f.flash, f.cd, f.combo, f.comboShow, f.walkPhase, f.blockLow, f.vy, f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, f.heat] = a;
+    [, f.x, f.y, f.face, f.hp, f.trail, f.state, f.t, f.move, f.onGround, f.flash, f.cd, f.combo, f.comboShow, f.walkPhase, f.blockLow, f.vy, f.flip, f.airAttacked, f.throwDir, f.jumpV, f.blockedExtra, f.noteShow, f.note, f.heat, f.throwPull] = a;
   });
   G.projectiles = d.p.map(a => ({x: a[0], y: a[1], vx: a[2], s: FIGHTERS[a[3]].special, t: a[4], r: a[5]}));
   const was = G.phase;

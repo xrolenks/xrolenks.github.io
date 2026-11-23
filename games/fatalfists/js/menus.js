@@ -1,18 +1,18 @@
 'use strict';
 // Fatal Fists - menu screens, fighter select, buttons, keys, touch
 // ===== Screens =====
-const SCREENS = ['title', 'level', 'select', 'help', 'moves', 'controls', 'online', 'pause', 'end'];
+const SCREENS = ['title', 'level', 'select', 'moves', 'controls', 'online', 'pause', 'end'];
 function show(name) {
   G.screen = name === 'pause' ? 'game' : name;
   G.paused = name === 'pause';
   for (const s of SCREENS) $('s-' + s).classList.toggle('on', s === name);
-  document.body.classList.toggle('practice', isPractice());      // shows the on-screen dummy buttons (practice.js)
+  document.body.classList.toggle('practice', G.mode === 'practice');      // shows the on-screen dummy buttons (practice.js)
+  document.body.classList.toggle('tutorial', G.mode === 'tutorial');      // shows the tutorial panel (tutorial.js)
   document.body.classList.toggle('playing', name === 'game');
   for (const k in keys) keys[k] = false;
   if (name === 'select') buildSelect();
   if (name === 'moves') buildMoves();
   if (name === 'controls') buildControls();
-  if (name === 'help') showKeyLabels();
   const first = name !== 'game' && $('s-' + name).querySelector('button');
   if (first && !document.body.classList.contains('touch')) first.focus();
 }
@@ -186,13 +186,6 @@ function bindPress(e) {      // a key was pressed while waiting to bind it
   if (btn) btn.focus();
 }
 $('resetKeys').onclick = () => { resetKeys(); binding = null; buildControls(); };
-// fill in the chosen keys wherever the help screen shows them (<kbd data-key="0.punch">)
-function showKeyLabels() {
-  document.querySelectorAll('[data-key]').forEach(el => {
-    const [p, b] = el.dataset.key.split('.');
-    el.textContent = keyName(KEYMAP[+p][b][0]);
-  });
-}
 
 // buttons
 document.addEventListener('click', e => {
@@ -222,7 +215,7 @@ document.addEventListener('click', e => {
   else if (g === 'resume') show('game');
   else if (g === 'restart') startMatch();
   else if (g === 'title') { G.fighters = null; show('title'); }
-  else if (g === 'help') show('help');
+  else if (g === 'help') startTutorial();      // "How to play" = the playable tutorial (tutorial.js)
 });
 function updateMute() { $('muteBtn').textContent = 'Sound: ' + (settings.muted ? 'off' : 'on'); }
 $('muteBtn').onclick = () => { settings.muted = !settings.muted; saveSettings(); updateMute(); SFX.select(); };
